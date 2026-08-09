@@ -1,0 +1,11 @@
+
+# Punteros locales al vault Obsidian (one-machine symlinks, no portable).
+# No commitear. Si otro dev trabaja en este repo, que corra
+# <vault>/00 meta/bin/init-vault-context.sh <project-path> <repo-dir>
+.vault-context/
+
+# Toolchain Rust local al proyecto.
+.tooling/
+
+# Artefactos de compilación.
+target/

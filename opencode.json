@@ -1,0 +1,12 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": [
+    "AGENTS.md",
+    ".vault-context/*.md"
+  ],
+  "permission": {
+    "external_directory": {
+      "/Users/asther0/Desktop/JHOMAR_LAB/asther0 vault/30 projects/side/CineplanetCLI/**": "allow"
+    }
+  }
+}
