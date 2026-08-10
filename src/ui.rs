@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Layout, Rect},
+    layout::{Alignment, Constraint, Flex, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
@@ -16,6 +16,17 @@ use crate::{
 const BLUE: Color = Color::Rgb(16, 70, 135);
 const GOLD: Color = Color::Rgb(255, 177, 47);
 
+const WELCOME_BRAND: &[&str] = &[
+    r"  ____  _              _   _       _    ",
+    r" / ___|(_)_ __ ___    | | | | ___ | | __",
+    r" \___ \| | '_ ` _ \   | |_| |/ _ \| |/ /",
+    r"  ___) | | | | | | |  |  _  | (_) |   < ",
+    r" |____/|_|_| |_| |_|  |_| |_|\___/|_|\_\",
+];
+const WELCOME_SUBTITLE: &str = "Cineplanet  ·  CineplanetCLI";
+const WELCOME_TAGLINE: &str = "Encuentra tu mejor funcion";
+const WELCOME_INSTRUCTIONS: &str = "[Enter]  comenzar       [Q]  /  [Ctrl-C]  salir";
+
 pub fn render(frame: &mut Frame<'_>, app: &App) {
     let [header, body, footer] = Layout::vertical([
         Constraint::Length(3),
@@ -26,12 +37,27 @@ pub fn render(frame: &mut Frame<'_>, app: &App) {
 
     render_header(frame, header, app);
     match app.screen() {
+        Screen::Welcome => render_welcome(frame, body),
         Screen::VenueSetup => render_venues(frame, body, app),
         Screen::Movies => render_movies(frame, body, app),
+        Screen::Loading => render_loading(frame, body),
         Screen::Results => render_results(frame, body, app),
         Screen::SeatMap => render_seat_map(frame, body, app),
     }
     render_footer(frame, footer, app);
+}
+
+fn render_loading(frame: &mut Frame<'_>, area: Rect) {
+    frame.render_widget(
+        Paragraph::new("Consultando mapas de asientos reales de Cineplanet…")
+            .alignment(Alignment::Center)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" Actualizando disponibilidad "),
+            ),
+        area,
+    );
 }
 
 fn render_header(frame: &mut Frame<'_>, area: Rect, app: &App) {
@@ -47,19 +73,63 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, app: &App) {
                 .bg(BLUE)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(
-            " MODO DEMO ",
-            Style::default()
-                .fg(Color::Black)
-                .bg(GOLD)
-                .add_modifier(Modifier::BOLD),
-        ),
+        if app.is_demo() {
+            Span::styled(
+                " MODO DEMO ",
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(GOLD)
+                    .add_modifier(Modifier::BOLD),
+            )
+        } else {
+            Span::styled(
+                " DATOS EN VIVO ",
+                Style::default().fg(GOLD).add_modifier(Modifier::BOLD),
+            )
+        },
         Span::styled(movie, Style::default().fg(Color::DarkGray)),
     ]);
     frame.render_widget(
         Paragraph::new(title).block(Block::default().borders(Borders::BOTTOM)),
         area,
     );
+}
+
+fn render_welcome(frame: &mut Frame<'_>, area: Rect) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(GOLD))
+        .title(Line::from(vec![Span::styled(
+            " Bienvenido ",
+            Style::default()
+                .fg(Color::Black)
+                .bg(GOLD)
+                .add_modifier(Modifier::BOLD),
+        )]));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let mut lines: Vec<Line> = WELCOME_BRAND.iter().map(|line| Line::from(*line)).collect();
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        WELCOME_SUBTITLE,
+        Style::default().add_modifier(Modifier::BOLD).fg(GOLD),
+    )));
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        WELCOME_TAGLINE,
+        Style::default().add_modifier(Modifier::BOLD),
+    )));
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        WELCOME_INSTRUCTIONS,
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    let [content] = Layout::vertical([Constraint::Length(lines.len() as u16)])
+        .flex(Flex::Center)
+        .areas(inner);
+    frame.render_widget(Paragraph::new(lines).alignment(Alignment::Center), content);
 }
 
 fn render_venues(frame: &mut Frame<'_>, area: Rect, app: &App) {
@@ -272,8 +342,10 @@ fn render_seat_map(frame: &mut Frame<'_>, area: Rect, app: &App) {
 
 fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App) {
     let help = match app.screen() {
+        Screen::Welcome => "Enter comenzar · Q / Ctrl-C salir",
         Screen::VenueSetup => "↑↓ mover · Espacio marcar · Enter guardar · Q salir",
         Screen::Movies => "Escribe para filtrar · ↑↓ mover · Enter analizar · P sedes · Q salir",
+        Screen::Loading => "Actualizando disponibilidad real…",
         Screen::Results => "↑↓ mover · Enter ver sala · Esc volver · P sedes · Q salir",
         Screen::SeatMap => "Esc volver · Q salir",
     };

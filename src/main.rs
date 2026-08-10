@@ -1,18 +1,35 @@
 use anyhow::Result;
 use cineplanet_cli::{
     app::{Action, App, Effect},
-    demo, settings, ui,
+    demo, live, settings, ui,
 };
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::DefaultTerminal;
 
 fn main() -> Result<()> {
     let preferences = settings::load()?;
-    let mut app = App::new(demo::catalog(), preferences);
-    ratatui::run(|terminal| run(terminal, &mut app))
+    let runtime = tokio::runtime::Runtime::new()?;
+    let is_demo = std::env::var_os("CINEPLANET_DEMO").is_some();
+    let (client, catalog) = if is_demo {
+        (None, demo::catalog())
+    } else {
+        let (client, catalog) = runtime.block_on(live::load_catalog())?;
+        (Some(client), catalog)
+    };
+    let mut app = if is_demo {
+        App::new(catalog, preferences)
+    } else {
+        App::live(catalog, preferences)
+    };
+    ratatui::run(|terminal| run(terminal, &mut app, client.as_ref(), &runtime))
 }
 
-fn run(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
+fn run(
+    terminal: &mut DefaultTerminal,
+    app: &mut App,
+    client: Option<&live::CineplanetClient>,
+    runtime: &tokio::runtime::Runtime,
+) -> Result<()> {
     while !app.should_quit() {
         terminal.draw(|frame| ui::render(frame, app))?;
         let Event::Key(key) = event::read()? else {
@@ -24,8 +41,24 @@ fn run(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
         let Some(action) = action_for(key) else {
             continue;
         };
-        if app.apply(action)? == Effect::SavePreferences {
-            settings::save(app.preferences())?;
+        match app.apply(action)? {
+            Effect::None => {}
+            Effect::SavePreferences => settings::save(app.preferences())?,
+            Effect::FetchSeatMaps(_) => {
+                terminal.draw(|frame| ui::render(frame, app))?;
+                let showtimes = app.selected_showtimes();
+                let hydrated = match client {
+                    Some(client) => runtime.block_on(client.hydrate_showtimes(&showtimes)),
+                    None => Ok(showtimes),
+                };
+                match hydrated {
+                    Ok(showtimes) => app.finish_loading_showtimes(showtimes),
+                    Err(error) => {
+                        app.loading_failed();
+                        eprintln!("No se pudieron actualizar los asientos reales: {error:#}");
+                    }
+                }
+            }
         }
     }
     Ok(())

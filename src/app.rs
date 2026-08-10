@@ -7,8 +7,10 @@ use crate::{
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Screen {
+    Welcome,
     VenueSetup,
     Movies,
+    Loading,
     Results,
     SeatMap,
 }
@@ -26,10 +28,11 @@ pub enum Action {
     Quit,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Effect {
     None,
     SavePreferences,
+    FetchSeatMaps(String),
 }
 
 pub struct App {
@@ -43,19 +46,23 @@ pub struct App {
     recommendations: Vec<Recommendation>,
     result_index: usize,
     should_quit: bool,
+    is_demo: bool,
 }
 
 impl App {
     pub fn new(catalog: Catalog, preferences: Preferences) -> Self {
-        let screen = if preferences.onboarding_complete {
-            Screen::Movies
-        } else {
-            Screen::VenueSetup
-        };
+        Self::with_mode(catalog, preferences, true)
+    }
+
+    pub fn live(catalog: Catalog, preferences: Preferences) -> Self {
+        Self::with_mode(catalog, preferences, false)
+    }
+
+    fn with_mode(catalog: Catalog, preferences: Preferences, is_demo: bool) -> Self {
         Self {
             catalog,
             preferences,
-            screen,
+            screen: Screen::Welcome,
             venue_index: 0,
             movie_index: 0,
             query: String::new(),
@@ -63,6 +70,7 @@ impl App {
             recommendations: Vec::new(),
             result_index: 0,
             should_quit: false,
+            is_demo,
         }
     }
 
@@ -110,6 +118,10 @@ impl App {
         self.should_quit
     }
 
+    pub fn is_demo(&self) -> bool {
+        self.is_demo
+    }
+
     pub fn visible_movies(&self) -> Vec<&Movie> {
         self.filtered_movie_indices()
             .into_iter()
@@ -121,6 +133,37 @@ impl App {
         self.recommendations.get(self.result_index)
     }
 
+    pub fn selected_showtimes(&self) -> Vec<crate::domain::Showtime> {
+        self.selected_movie_id
+            .as_ref()
+            .map_or_else(Vec::new, |movie_id| {
+                self.catalog
+                    .showtimes
+                    .iter()
+                    .filter(|showtime| &showtime.movie_id == movie_id)
+                    .cloned()
+                    .collect()
+            })
+    }
+
+    pub fn finish_loading_showtimes(&mut self, showtimes: Vec<crate::domain::Showtime>) {
+        let Some(movie_id) = self.selected_movie_id.as_ref() else {
+            return;
+        };
+        self.catalog
+            .showtimes
+            .retain(|showtime| &showtime.movie_id != movie_id);
+        self.catalog.showtimes.extend(showtimes);
+        let selected = self.selected_showtimes();
+        self.recommendations = ranking::recommend(&selected, &self.preferences, 3);
+        self.result_index = 0;
+        self.screen = Screen::Results;
+    }
+
+    pub fn loading_failed(&mut self) {
+        self.screen = Screen::Movies;
+    }
+
     pub fn apply(&mut self, action: Action) -> Result<Effect> {
         if action == Action::Quit {
             self.should_quit = true;
@@ -128,6 +171,13 @@ impl App {
         }
 
         match (self.screen, action) {
+            (Screen::Welcome, Action::Confirm) => {
+                self.screen = if self.preferences.onboarding_complete {
+                    Screen::Movies
+                } else {
+                    Screen::VenueSetup
+                };
+            }
             (Screen::VenueSetup, Action::Up) => {
                 if !self.catalog.venues.is_empty() {
                     self.venue_index = self
@@ -178,17 +228,11 @@ impl App {
                     self.filtered_movie_indices().get(self.movie_index).copied()
                 {
                     let movie_id = self.catalog.movies[movie_index].id.clone();
-                    let showtimes: Vec<_> = self
-                        .catalog
-                        .showtimes
-                        .iter()
-                        .filter(|showtime| showtime.movie_id == movie_id)
-                        .cloned()
-                        .collect();
-                    self.recommendations = ranking::recommend(&showtimes, &self.preferences, 3);
                     self.selected_movie_id = Some(movie_id);
-                    self.result_index = 0;
-                    self.screen = Screen::Results;
+                    self.screen = Screen::Loading;
+                    return Ok(Effect::FetchSeatMaps(
+                        self.selected_movie_id.clone().unwrap(),
+                    ));
                 }
             }
             (Screen::Movies, Action::EditVenues) => {
@@ -215,6 +259,7 @@ impl App {
             (Screen::Results, Action::Back) => {
                 self.screen = Screen::Movies;
             }
+            (Screen::Loading, Action::Back) => self.screen = Screen::Movies,
             (Screen::Results, Action::EditVenues) => {
                 self.screen = Screen::VenueSetup;
             }
@@ -248,6 +293,8 @@ mod tests {
     fn first_run_allows_selecting_multiple_favorite_venues() {
         let mut app = App::new(demo::catalog(), Preferences::default());
 
+        assert_eq!(app.screen(), Screen::Welcome);
+        app.apply(Action::Confirm).unwrap();
         assert_eq!(app.screen(), Screen::VenueSetup);
         app.apply(Action::Toggle).unwrap();
         app.apply(Action::Down).unwrap();
@@ -268,13 +315,82 @@ mod tests {
         };
         let mut app = App::new(demo::catalog(), preferences);
 
+        assert_eq!(app.screen(), Screen::Welcome);
+        app.apply(Action::Confirm).unwrap();
+        assert_eq!(app.screen(), Screen::Movies);
         app.apply(Action::Character('s')).unwrap();
         app.apply(Action::Character('p')).unwrap();
-        app.apply(Action::Confirm).unwrap();
+        let effect = app.apply(Action::Confirm).unwrap();
 
+        assert_eq!(app.screen(), Screen::Loading);
+        assert_eq!(effect, Effect::FetchSeatMaps("spider-man".into()));
+        let showtimes = app.selected_showtimes();
+        app.finish_loading_showtimes(showtimes);
         assert_eq!(app.screen(), Screen::Results);
         assert_eq!(app.current_movie().unwrap().id, "spider-man");
         assert!(!app.recommendations().is_empty());
         assert!(app.recommendations().len() <= 3);
+    }
+
+    #[test]
+    fn welcome_is_the_initial_screen_on_first_run() {
+        let app = App::new(demo::catalog(), Preferences::default());
+        assert_eq!(app.screen(), Screen::Welcome);
+        assert!(!app.preferences().onboarding_complete);
+    }
+
+    #[test]
+    fn welcome_is_the_initial_screen_when_preferences_are_complete() {
+        let preferences = Preferences {
+            onboarding_complete: true,
+            ..Preferences::default()
+        };
+        let app = App::new(demo::catalog(), preferences);
+        assert_eq!(app.screen(), Screen::Welcome);
+    }
+
+    #[test]
+    fn welcome_confirm_transitions_to_venue_setup_on_first_run() {
+        let mut app = App::new(demo::catalog(), Preferences::default());
+
+        app.apply(Action::Confirm).unwrap();
+
+        assert_eq!(app.screen(), Screen::VenueSetup);
+        assert!(!app.preferences().onboarding_complete);
+    }
+
+    #[test]
+    fn welcome_confirm_transitions_to_movies_when_preferences_are_complete() {
+        let preferences = Preferences {
+            onboarding_complete: true,
+            ..Preferences::default()
+        };
+        let mut app = App::new(demo::catalog(), preferences);
+
+        app.apply(Action::Confirm).unwrap();
+
+        assert_eq!(app.screen(), Screen::Movies);
+    }
+
+    #[test]
+    fn welcome_ignores_actions_other_than_confirm() {
+        let mut app = App::new(demo::catalog(), Preferences::default());
+
+        for action in [
+            Action::Up,
+            Action::Down,
+            Action::Toggle,
+            Action::Character('a'),
+            Action::Backspace,
+            Action::Back,
+            Action::EditVenues,
+        ] {
+            app.apply(action).unwrap();
+        }
+
+        assert_eq!(app.screen(), Screen::Welcome);
+        assert!(!app.should_quit());
+        assert!(app.preferences().favorite_venue_ids.is_empty());
+        assert!(app.query().is_empty());
     }
 }
