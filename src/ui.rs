@@ -139,46 +139,19 @@ fn welcome_brand() -> Vec<Line<'static>> {
         Color::Rgb(84, 169, 137),
         Color::Rgb(65, 135, 162),
     ];
-    let strip = |color| Span::styled("[]", Style::default().fg(color));
+    let strip = |color| Span::styled("##", Style::default().fg(color));
 
     vec![
-        Line::from(Span::styled("          .----------.", edge)),
         Line::from(vec![
-            Span::styled("       .'", edge),
-            Span::styled("              ", planet),
-            Span::styled("'.", edge),
-        ]),
-        Line::from(vec![
-            Span::styled("      /  ", edge),
-            strip(ribbon[1]),
-            strip(ribbon[2]),
-            strip(ribbon[3]),
-            Span::styled("  ", planet),
-            strip(ribbon[4]),
-            strip(ribbon[5]),
-            Span::styled("   \\", edge),
-        ]),
-        Line::from(vec![
-            Span::styled("     | ", edge),
+            Span::styled("      .-------", edge),
             strip(ribbon[0]),
             strip(ribbon[1]),
             strip(ribbon[2]),
             strip(ribbon[3]),
             strip(ribbon[4]),
             strip(ribbon[5]),
-            Span::styled("   |", edge),
+            Span::styled("-------.", edge),
         ]),
-        Line::from(vec![
-            Span::styled("      \\  ", edge),
-            strip(ribbon[0]),
-            strip(ribbon[1]),
-            strip(ribbon[2]),
-            strip(ribbon[3]),
-            strip(ribbon[4]),
-            strip(ribbon[5]),
-            Span::styled("  /", edge),
-        ]),
-        Line::from(Span::styled("       '.____________.'", edge)),
         Line::from(vec![
             Span::styled("          cineplanet", planet.add_modifier(Modifier::BOLD)),
             Span::styled(
