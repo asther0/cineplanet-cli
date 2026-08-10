@@ -54,13 +54,20 @@ Al iniciar, consulta el contrato público de Cineplanet con una sesión anónima
 Si el contrato cambia, falla de forma explícita; nunca sustituye datos reales por demo.
 El demo solo se habilita explícitamente con `CINEPLANET_DEMO=1`.
 
-## Desarrollo
+## Inicio
 
-Requiere Rust estable.
+Tras instalar el binario, lanza la aplicación interactiva con un solo comando:
 
 ```bash
-cargo test
-cargo run
+cineplanet-cli
 ```
+
+La TUI responde al teclado:
+
+- Flechas: moverte entre opciones.
+- Enter: seleccionar o continuar.
+- Space: alternar selección en los selectores múltiples.
+- Esc: volver al paso anterior.
+- Q: salir.
 
 El MVP tendrá soporte verificado en macOS.
