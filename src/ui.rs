@@ -14,17 +14,12 @@ use crate::{
 };
 
 const BLUE: Color = Color::Rgb(16, 70, 135);
+const PLANET_BLUE: Color = Color::Rgb(45, 76, 133);
+const PLANET_LIGHT_BLUE: Color = Color::Rgb(79, 126, 186);
 const GOLD: Color = Color::Rgb(255, 177, 47);
 
-const WELCOME_BRAND: &[&str] = &[
-    r"  ____  _              _   _       _    ",
-    r" / ___|(_)_ __ ___    | | | | ___ | | __",
-    r" \___ \| | '_ ` _ \   | |_| |/ _ \| |/ /",
-    r"  ___) | | | | | | |  |  _  | (_) |   < ",
-    r" |____/|_|_| |_| |_|  |_| |_|\___/|_|\_\",
-];
-const WELCOME_SUBTITLE: &str = "Cineplanet  ·  CineplanetCLI";
-const WELCOME_TAGLINE: &str = "Encuentra tu mejor funcion";
+const WELCOME_SUBTITLE: &str = "Cartelera y asientos de Cineplanet";
+const WELCOME_TAGLINE: &str = "Encuentra tu mejor función";
 const WELCOME_INSTRUCTIONS: &str = "[Enter]  comenzar       [Q]  /  [Ctrl-C]  salir";
 
 pub fn render(frame: &mut Frame<'_>, app: &App) {
@@ -110,7 +105,7 @@ fn render_welcome(frame: &mut Frame<'_>, area: Rect) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let mut lines: Vec<Line> = WELCOME_BRAND.iter().map(|line| Line::from(*line)).collect();
+    let mut lines = welcome_brand();
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
         WELCOME_SUBTITLE,
@@ -131,6 +126,67 @@ fn render_welcome(frame: &mut Frame<'_>, area: Rect) {
         .flex(Flex::Center)
         .areas(inner);
     frame.render_widget(Paragraph::new(lines).alignment(Alignment::Center), content);
+}
+
+fn welcome_brand() -> Vec<Line<'static>> {
+    let planet = Style::default().fg(PLANET_BLUE);
+    let edge = Style::default().fg(PLANET_LIGHT_BLUE);
+    let ribbon = [
+        Color::Rgb(204, 94, 48),
+        Color::Rgb(222, 157, 57),
+        Color::Rgb(255, 235, 82),
+        Color::Rgb(173, 199, 89),
+        Color::Rgb(84, 169, 137),
+        Color::Rgb(65, 135, 162),
+    ];
+    let strip = |color| Span::styled("[]", Style::default().fg(color));
+
+    vec![
+        Line::from(Span::styled("          .----------.", edge)),
+        Line::from(vec![
+            Span::styled("       .'", edge),
+            Span::styled("              ", planet),
+            Span::styled("'.", edge),
+        ]),
+        Line::from(vec![
+            Span::styled("      /  ", edge),
+            strip(ribbon[1]),
+            strip(ribbon[2]),
+            strip(ribbon[3]),
+            Span::styled("  ", planet),
+            strip(ribbon[4]),
+            strip(ribbon[5]),
+            Span::styled("   \\", edge),
+        ]),
+        Line::from(vec![
+            Span::styled("     | ", edge),
+            strip(ribbon[0]),
+            strip(ribbon[1]),
+            strip(ribbon[2]),
+            strip(ribbon[3]),
+            strip(ribbon[4]),
+            strip(ribbon[5]),
+            Span::styled("   |", edge),
+        ]),
+        Line::from(vec![
+            Span::styled("      \\  ", edge),
+            strip(ribbon[0]),
+            strip(ribbon[1]),
+            strip(ribbon[2]),
+            strip(ribbon[3]),
+            strip(ribbon[4]),
+            strip(ribbon[5]),
+            Span::styled("  /", edge),
+        ]),
+        Line::from(Span::styled("       '.____________.'", edge)),
+        Line::from(vec![
+            Span::styled("          cineplanet", planet.add_modifier(Modifier::BOLD)),
+            Span::styled(
+                " CLI",
+                Style::default().fg(GOLD).add_modifier(Modifier::BOLD),
+            ),
+        ]),
+    ]
 }
 
 fn render_venues(frame: &mut Frame<'_>, area: Rect, app: &App) {
