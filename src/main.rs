@@ -69,6 +69,7 @@ fn action_for(key: KeyEvent) -> Option<Action> {
         (KeyCode::Char('c'), KeyModifiers::CONTROL) => Some(Action::Quit),
         (KeyCode::Char('Q'), _) => Some(Action::Quit),
         (KeyCode::Char('P'), _) => Some(Action::EditVenues),
+        (KeyCode::Char('F'), _) => Some(Action::OpenFilters),
         (KeyCode::Char(' '), _) => Some(Action::Toggle),
         (KeyCode::Char(character), _) => Some(Action::Character(character)),
         (KeyCode::Up, _) => Some(Action::Up),
@@ -95,12 +96,20 @@ mod tests {
             Some(Action::Character('q'))
         );
         assert_eq!(
+            action_for(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE)),
+            Some(Action::Character('f'))
+        );
+        assert_eq!(
             action_for(KeyEvent::new(KeyCode::Char('P'), KeyModifiers::SHIFT)),
             Some(Action::EditVenues)
         );
         assert_eq!(
             action_for(KeyEvent::new(KeyCode::Char('Q'), KeyModifiers::SHIFT)),
             Some(Action::Quit)
+        );
+        assert_eq!(
+            action_for(KeyEvent::new(KeyCode::Char('F'), KeyModifiers::SHIFT)),
+            Some(Action::OpenFilters)
         );
     }
 }

@@ -1,5 +1,13 @@
 # CineplanetCLI
 
+![Rust](https://img.shields.io/badge/Rust-CE422B?style=flat&logo=rust&logoColor=white)
+![Ratatui](https://img.shields.io/badge/Ratatui-FFC131?style=flat&logoColor=black)
+![Crossterm](https://img.shields.io/badge/Crossterm-2D7DD2?style=flat&logoColor=white)
+![Tokio](https://img.shields.io/badge/Tokio-000000?style=flat&logoColor=white)
+![Reqwest](https://img.shields.io/badge/Reqwest-6E2EB1?style=flat&logoColor=white)
+
+[![image.png](https://i.postimg.cc/nLpQTNqN/image.png)](https://postimg.cc/w14vjffk)
+
 Encuentra funciones de Cineplanet con buenos asientos, sin revisar sede por sede.
 
 ```text

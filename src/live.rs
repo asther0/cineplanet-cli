@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use anyhow::{Context, Result, bail};
 use chrono::DateTime;
-use futures_util::{StreamExt, TryStreamExt, stream};
+use futures_util::{StreamExt, stream};
 use reqwest::{
     Client,
     header::{ACCEPT, USER_AGENT},
@@ -51,13 +51,15 @@ impl CineplanetClient {
     }
 
     pub async fn hydrate_showtimes(&self, showtimes: &[Showtime]) -> Result<Vec<Showtime>> {
-        stream::iter(showtimes.iter().cloned().map(|showtime| {
+        let results = stream::iter(showtimes.iter().cloned().map(|showtime| {
             let client = self.clone();
             async move { client.hydrate_showtime(showtime).await }
         }))
         .buffer_unordered(8)
-        .try_collect()
-        .await
+        .collect::<Vec<Result<Showtime>>>()
+        .await;
+
+        Ok(extract_ok_results(results))
     }
 
     async fn hydrate_showtime(&self, showtime: Showtime) -> Result<Showtime> {
@@ -71,23 +73,7 @@ impl CineplanetClient {
             showtime.venue_id
         );
         let response: SeatPlanResponse = self.get_json(&path).await?;
-        if response.response_code != "0" {
-            bail!(
-                "Cineplanet no entregó el mapa de {}: {}",
-                showtime.venue_name,
-                response
-                    .error_description
-                    .unwrap_or_else(|| "respuesta inválida".into())
-            );
-        }
-        let seat_map = seat_map_from(
-            response
-                .seat_layout_data
-                .context("Cineplanet no devolvió asientos")?,
-        )?;
-        let mut showtime = showtime;
-        showtime.seat_map = seat_map;
-        Ok(showtime)
+        apply_seat_plan(showtime, response)
     }
 
     async fn get_json<T: for<'de> Deserialize<'de>>(&self, path: &str) -> Result<T> {
@@ -104,6 +90,30 @@ impl CineplanetClient {
             .await
             .with_context(|| format!("Cineplanet cambió el formato de {path}"))
     }
+}
+
+fn apply_seat_plan(showtime: Showtime, response: SeatPlanResponse) -> Result<Showtime> {
+    if response.response_code != "0" {
+        bail!(
+            "Cineplanet no entregó el mapa de {}: {}",
+            showtime.venue_name,
+            response
+                .error_description
+                .unwrap_or_else(|| "respuesta inválida".into())
+        );
+    }
+    let seat_map = seat_map_from(
+        response
+            .seat_layout_data
+            .context("Cineplanet no devolvió asientos")?,
+    )?;
+    let mut showtime = showtime;
+    showtime.seat_map = seat_map;
+    Ok(showtime)
+}
+
+fn extract_ok_results<T>(results: Vec<Result<T>>) -> Vec<T> {
+    results.into_iter().filter_map(Result::ok).collect()
 }
 
 pub async fn load_catalog() -> Result<(CineplanetClient, Catalog)> {
@@ -357,6 +367,27 @@ struct SeatPosition {
 mod tests {
     use super::*;
 
+    fn make_test_showtime(id: &str) -> Showtime {
+        Showtime {
+            id: id.into(),
+            movie_id: "movie-1".into(),
+            movie_title: "Test Movie".into(),
+            venue_id: "venue-1".into(),
+            venue_name: "Test Venue".into(),
+            starts_at: DateTime::parse_from_rfc3339("2024-01-01T12:00:00-05:00").unwrap(),
+            modality: Modality {
+                projection_format: "2D".into(),
+                language: "ESP".into(),
+                room_type: "Regular".into(),
+            },
+            seat_map: SeatMap {
+                rows: 0,
+                columns: 0,
+                seats: Vec::new(),
+            },
+        }
+    }
+
     #[test]
     fn parses_a_realistic_seat_layout_without_exposing_remote_data() {
         let response: SeatPlanResponse = serde_json::from_str(r#"{"ResponseCode":"0","ErrorDescription":null,"SeatLayoutData":{"Areas":[{"Rows":[{"PhysicalName":"G","Seats":[{"Id":"7","Status":0,"Position":{"ColumnIndex":6}},{"Id":"8","Status":1,"Position":{"ColumnIndex":7}}]}]}]}}"#).unwrap();
@@ -365,6 +396,50 @@ mod tests {
         assert_eq!(map.columns, 8);
         assert_eq!(map.seats[0].state, SeatState::Available);
         assert_eq!(map.seats[1].state, SeatState::Occupied);
+    }
+
+    #[test]
+    fn null_seat_plan_parsing_fails() {
+        let showtime = make_test_showtime("st-1");
+        let response: SeatPlanResponse = serde_json::from_str(
+            r#"{"ResponseCode":"0","ErrorDescription":null,"SeatLayoutData":null}"#,
+        )
+        .unwrap();
+        let result = apply_seat_plan(showtime, response);
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("no devolvió asientos"),
+            "expected missing-seat error, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn error_response_code_fails() {
+        let showtime = make_test_showtime("st-2");
+        let response: SeatPlanResponse = serde_json::from_str(
+            r#"{"ResponseCode":"1","ErrorDescription":"sesion no disponible","SeatLayoutData":null}"#,
+        )
+        .unwrap();
+        let result = apply_seat_plan(showtime, response);
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("no entregó el mapa"),
+            "expected delivery error, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn batch_partial_success_keeps_only_ok_results() {
+        let results: Vec<Result<Showtime>> = vec![
+            Ok(make_test_showtime("ok-1")),
+            Err(anyhow::anyhow!("fail-1")),
+            Ok(make_test_showtime("ok-2")),
+        ];
+        let successful = extract_ok_results(results);
+        assert_eq!(successful.len(), 2);
+        assert!(successful.iter().all(|s| s.id.starts_with("ok")));
     }
 
     #[tokio::test]

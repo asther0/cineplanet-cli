@@ -14,8 +14,7 @@ use crate::{
 };
 
 const BLUE: Color = Color::Rgb(16, 70, 135);
-const PLANET_BLUE: Color = Color::Rgb(45, 76, 133);
-const PLANET_LIGHT_BLUE: Color = Color::Rgb(79, 126, 186);
+const PLANET_BLUE: Color = Color::Rgb(1, 42, 99);
 const GOLD: Color = Color::Rgb(255, 177, 47);
 
 const WELCOME_SUBTITLE: &str = "Cartelera y asientos de Cineplanet";
@@ -38,6 +37,7 @@ pub fn render(frame: &mut Frame<'_>, app: &App) {
         Screen::Movies => render_movies(frame, body, app),
         Screen::Loading => render_loading(frame, body),
         Screen::Results => render_results(frame, body, app),
+        Screen::Filters => render_filters(frame, body, app),
         Screen::SeatMap => render_seat_map(frame, body, app),
     }
     render_footer(frame, footer, app);
@@ -130,40 +130,41 @@ fn render_welcome(frame: &mut Frame<'_>, area: Rect) {
 
 fn welcome_brand() -> Vec<Line<'static>> {
     let planet = Style::default().fg(PLANET_BLUE);
-    let edge = Style::default().fg(PLANET_LIGHT_BLUE);
-    let ribbon = [
-        Color::Rgb(204, 94, 48),
-        Color::Rgb(222, 157, 57),
-        Color::Rgb(255, 235, 82),
-        Color::Rgb(173, 199, 89),
-        Color::Rgb(84, 169, 137),
-        Color::Rgb(65, 135, 162),
-    ];
-    let strip = |color| Span::styled("##", Style::default().fg(color));
 
     vec![
-        Line::from(vec![
-            Span::styled("      .-------", edge),
-            strip(ribbon[0]),
-            strip(ribbon[1]),
-            strip(ribbon[2]),
-            strip(ribbon[3]),
-            strip(ribbon[4]),
-            strip(ribbon[5]),
-            Span::styled("-------.", edge),
-        ]),
-        Line::from(vec![
-            Span::styled("          cineplanet", planet.add_modifier(Modifier::BOLD)),
-            Span::styled(
-                " CLI",
-                Style::default().fg(GOLD).add_modifier(Modifier::BOLD),
-            ),
-        ]),
+        Line::from(Span::styled(
+            "  ░██████  ░██████░███    ░██ ░██████████ ░█████████  ░██            ░███    ░███    ░██ ░██████████ ░██████████",
+            planet,
+        )),
+        Line::from(Span::styled(
+            " ░██   ░██   ░██  ░████   ░██ ░██         ░██     ░██ ░██           ░██░██   ░████   ░██ ░██             ░██    ",
+            planet,
+        )),
+        Line::from(Span::styled(
+            "░██          ░██  ░██░██  ░██ ░██         ░██     ░██ ░██          ░██  ░██  ░██░██  ░██ ░██             ░██    ",
+            planet,
+        )),
+        Line::from(Span::styled(
+            "░██          ░██  ░██ ░██ ░██ ░█████████  ░█████████  ░██         ░█████████ ░██ ░██ ░██ ░█████████      ░██    ",
+            planet,
+        )),
+        Line::from(Span::styled(
+            "░██          ░██  ░██  ░██░██ ░██         ░██         ░██         ░██    ░██ ░██  ░██░██ ░██             ░██    ",
+            planet,
+        )),
+        Line::from(Span::styled(
+            " ░██   ░██   ░██  ░██   ░████ ░██         ░██         ░██         ░██    ░██ ░██   ░████ ░██             ░██    ",
+            planet,
+        )),
+        Line::from(Span::styled(
+            "  ░██████  ░██████░██    ░███ ░██████████ ░██         ░██████████ ░██    ░██ ░██    ░███ ░██████████     ░██    ",
+            planet,
+        )),
     ]
 }
 
 fn render_venues(frame: &mut Frame<'_>, area: Rect, app: &App) {
-    let items: Vec<_> = app
+    let mut items: Vec<_> = app
         .visible_venues()
         .into_iter()
         .map(|venue| {
@@ -175,6 +176,18 @@ fn render_venues(frame: &mut Frame<'_>, area: Rect, app: &App) {
             ))
         })
         .collect();
+    let continue_style = if app.venue_setup_on_continue() {
+        Style::default()
+            .fg(Color::White)
+            .bg(BLUE)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().add_modifier(Modifier::BOLD)
+    };
+    items.push(ListItem::new(Line::from(Span::styled(
+        "Continuar",
+        continue_style,
+    ))));
     let mut state = ListState::default().with_selected(Some(app.venue_index()));
     let list = List::new(items)
         .block(
@@ -193,7 +206,7 @@ fn render_venues(frame: &mut Frame<'_>, area: Rect, app: &App) {
 }
 
 fn render_city_setup(frame: &mut Frame<'_>, area: Rect, app: &App) {
-    let items: Vec<_> = app
+    let mut items: Vec<_> = app
         .available_cities()
         .into_iter()
         .map(|city| {
@@ -205,6 +218,18 @@ fn render_city_setup(frame: &mut Frame<'_>, area: Rect, app: &App) {
             ListItem::new(format!("{marker}{city}"))
         })
         .collect();
+    let continue_style = if app.city_setup_on_continue() {
+        Style::default()
+            .fg(Color::White)
+            .bg(BLUE)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().add_modifier(Modifier::BOLD)
+    };
+    items.push(ListItem::new(Line::from(Span::styled(
+        "Continuar",
+        continue_style,
+    ))));
     let mut state = if items.is_empty() {
         ListState::default()
     } else {
@@ -286,6 +311,16 @@ fn render_results(frame: &mut Frame<'_>, area: Rect, app: &App) {
         return;
     }
 
+    let title = if app.filters_active() {
+        format!(
+            " Mejores funciones ({} fechas, {} sedes) ",
+            app.selected_filter_dates().len(),
+            app.selected_filter_venues().len()
+        )
+    } else {
+        " Mejores funciones ".to_string()
+    };
+
     let items: Vec<_> = app
         .recommendations()
         .iter()
@@ -323,12 +358,67 @@ fn render_results(frame: &mut Frame<'_>, area: Rect, app: &App) {
         .collect();
     let mut state = ListState::default().with_selected(Some(app.result_index()));
     let list = List::new(items)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(" Mejores funciones "),
-        )
+        .block(Block::default().borders(Borders::ALL).title(title))
         .highlight_style(Style::default().fg(Color::White).bg(BLUE))
+        .highlight_symbol("› ");
+    frame.render_stateful_widget(list, area, &mut state);
+}
+
+fn render_filters(frame: &mut Frame<'_>, area: Rect, app: &App) {
+    let mut items: Vec<ListItem> = Vec::new();
+
+    for date in app.filter_dates() {
+        let checked = app.selected_filter_dates().contains(date);
+        let label = if let Ok(parsed) = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d") {
+            parsed.format("%d/%m/%Y").to_string()
+        } else {
+            date.clone()
+        };
+        items.push(ListItem::new(format!(
+            "{} {}",
+            if checked { "[x]" } else { "[ ]" },
+            label
+        )));
+    }
+
+    for venue_id in app.filter_venues() {
+        let checked = app.selected_filter_venues().contains(venue_id);
+        let venue_name = app
+            .catalog()
+            .venues
+            .iter()
+            .find(|v| v.id == *venue_id)
+            .map(|v| v.name.as_str())
+            .unwrap_or(venue_id);
+        items.push(ListItem::new(format!(
+            "{} {}",
+            if checked { "[x]" } else { "[ ]" },
+            venue_name
+        )));
+    }
+
+    let apply_style = if app.filter_on_apply() {
+        Style::default()
+            .fg(Color::White)
+            .bg(BLUE)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().add_modifier(Modifier::BOLD)
+    };
+    items.push(ListItem::new(Line::from(Span::styled(
+        "Aplicar filtros",
+        apply_style,
+    ))));
+
+    let mut state = ListState::default().with_selected(Some(app.filter_cursor()));
+    let list = List::new(items)
+        .block(Block::default().borders(Borders::ALL).title(" Filtros "))
+        .highlight_style(
+            Style::default()
+                .fg(Color::White)
+                .bg(BLUE)
+                .add_modifier(Modifier::BOLD),
+        )
         .highlight_symbol("› ");
     frame.render_stateful_widget(list, area, &mut state);
 }
@@ -410,7 +500,8 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App) {
         Screen::VenueSetup => "↑↓ mover · Espacio marcar · Enter guardar · Q salir",
         Screen::Movies => "Escribe para filtrar · ↑↓ mover · Enter analizar · P sedes · Q salir",
         Screen::Loading => "Actualizando disponibilidad real…",
-        Screen::Results => "↑↓ mover · Enter ver sala · Esc volver · P sedes · Q salir",
+        Screen::Results => "↑↓ mover · Enter ver sala · F filtros · Esc volver · P sedes · Q salir",
+        Screen::Filters => "↑↓ mover · Espacio marcar · Enter aplicar · Esc volver · Q salir",
         Screen::SeatMap => "Esc volver · Q salir",
     };
     frame.render_widget(
