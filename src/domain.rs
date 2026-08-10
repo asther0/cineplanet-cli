@@ -4,6 +4,22 @@ use chrono::{DateTime, FixedOffset};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Movie {
+    pub id: String,
+    pub title: String,
+    pub duration_minutes: Option<u16>,
+    pub genre: Option<String>,
+    pub rating: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Venue {
+    pub id: String,
+    pub name: String,
+    pub city: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SeatState {
     Available,
     Occupied,
@@ -47,7 +63,9 @@ pub struct Showtime {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Preferences {
+    pub onboarding_complete: bool,
     pub party_size: usize,
     pub favorite_venue_ids: BTreeSet<String>,
     pub accepted_languages: BTreeSet<String>,
@@ -58,6 +76,7 @@ pub struct Preferences {
 impl Default for Preferences {
     fn default() -> Self {
         Self {
+            onboarding_complete: false,
             party_size: 2,
             favorite_venue_ids: BTreeSet::new(),
             accepted_languages: BTreeSet::new(),
@@ -82,4 +101,11 @@ pub struct Recommendation {
     pub reasons: Vec<String>,
     #[serde(skip)]
     pub score: f64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Catalog {
+    pub movies: Vec<Movie>,
+    pub venues: Vec<Venue>,
+    pub showtimes: Vec<Showtime>,
 }
