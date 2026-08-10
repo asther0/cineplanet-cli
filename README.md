@@ -35,12 +35,14 @@ En desarrollo temprano.
 
 - [x] Dominio de funciones, preferencias y mapas de sala
 - [x] Primer ranking de bloques contiguos
+- [x] Preferencias persistentes y onboarding de sedes
+- [x] Flujo TUI completo con datos demo
 - [ ] Adaptador HTTP de Cineplanet
-- [ ] Preferencias persistentes
-- [ ] Flujo TUI completo
+- [ ] Filtros interactivos de fecha, hora y modalidad
 - [ ] Revalidación y entrega a Cineplanet
 
 El runtime será determinista: sin LLM y sin navegador oculto durante el uso normal.
+Hasta conectar el adaptador HTTP, la aplicación muestra `MODO DEMO` de forma permanente.
 
 ## Desarrollo
 
