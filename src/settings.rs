@@ -86,6 +86,7 @@ mod tests {
             onboarding_complete: true,
             party_size: 4,
             favorite_venue_ids: BTreeSet::from(["la-molina".into(), "risso".into()]),
+            city: None,
             accepted_languages: BTreeSet::from(["Subtitulada".into()]),
             accepted_formats: BTreeSet::from(["2D".into()]),
             accepted_room_types: BTreeSet::from(["Regular".into(), "Prime".into()]),

@@ -38,6 +38,7 @@ pub fn render(frame: &mut Frame<'_>, app: &App) {
     render_header(frame, header, app);
     match app.screen() {
         Screen::Welcome => render_welcome(frame, body),
+        Screen::CitySetup => render_city_setup(frame, body, app),
         Screen::VenueSetup => render_venues(frame, body, app),
         Screen::Movies => render_movies(frame, body, app),
         Screen::Loading => render_loading(frame, body),
@@ -134,9 +135,8 @@ fn render_welcome(frame: &mut Frame<'_>, area: Rect) {
 
 fn render_venues(frame: &mut Frame<'_>, area: Rect, app: &App) {
     let items: Vec<_> = app
-        .catalog()
-        .venues
-        .iter()
+        .visible_venues()
+        .into_iter()
         .map(|venue| {
             let checked = app.preferences().favorite_venue_ids.contains(&venue.id);
             ListItem::new(format!(
@@ -152,6 +152,40 @@ fn render_venues(frame: &mut Frame<'_>, area: Rect, app: &App) {
             Block::default()
                 .borders(Borders::ALL)
                 .title(" Sedes favoritas "),
+        )
+        .highlight_style(
+            Style::default()
+                .fg(Color::White)
+                .bg(BLUE)
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol("› ");
+    frame.render_stateful_widget(list, area, &mut state);
+}
+
+fn render_city_setup(frame: &mut Frame<'_>, area: Rect, app: &App) {
+    let items: Vec<_> = app
+        .available_cities()
+        .into_iter()
+        .map(|city| {
+            let marker = if app.preferences().city.as_deref() == Some(city) {
+                "(actual) "
+            } else {
+                ""
+            };
+            ListItem::new(format!("{marker}{city}"))
+        })
+        .collect();
+    let mut state = if items.is_empty() {
+        ListState::default()
+    } else {
+        ListState::default().with_selected(Some(app.city_index()))
+    };
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" Elige tu ciudad "),
         )
         .highlight_style(
             Style::default()
@@ -343,6 +377,7 @@ fn render_seat_map(frame: &mut Frame<'_>, area: Rect, app: &App) {
 fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App) {
     let help = match app.screen() {
         Screen::Welcome => "Enter comenzar · Q / Ctrl-C salir",
+        Screen::CitySetup => "↑↓ mover · Enter elegir ciudad · Q salir",
         Screen::VenueSetup => "↑↓ mover · Espacio marcar · Enter guardar · Q salir",
         Screen::Movies => "Escribe para filtrar · ↑↓ mover · Enter analizar · P sedes · Q salir",
         Screen::Loading => "Actualizando disponibilidad real…",
