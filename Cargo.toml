@@ -5,13 +5,9 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.104"
-async-trait = "0.1.92"
 chrono = { version = "0.4.45", features = ["serde"] }
 crossterm = "0.29.0"
 directories = "6.0.0"
 ratatui = "0.30.2"
-reqwest = { version = "0.13.4", default-features = false, features = ["json", "cookies", "rustls"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
-thiserror = "2.0.20"
-tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread", "time"] }
