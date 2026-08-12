@@ -596,9 +596,16 @@ fn render_seat_map(frame: &mut Frame<'_>, area: Rect, app: &App) {
         })
         .unwrap_or_default();
 
+    let useful_map_width = usize::from(map.columns).saturating_mul(3).saturating_add(4);
+    let screen_width = useful_map_width.min(usize::from(area.width.saturating_sub(2)));
+    let screen = if screen_width >= " PANTALLA ".len() {
+        format!("{:^screen_width$}", " PANTALLA ")
+    } else {
+        " ".repeat(screen_width)
+    };
     let mut lines = vec![
         Line::from(Span::styled(
-            "                         PANTALLA                         ",
+            screen,
             Style::default().fg(Color::White).bg(BLUE),
         )),
         Line::from(""),

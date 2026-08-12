@@ -52,9 +52,9 @@ fn best_recommendation(showtime: &Showtime, preferences: &Preferences) -> Option
     for seats in rows.values_mut() {
         seats.sort_by_key(|seat| seat.number);
         for window in seats.windows(preferences.party_size) {
-            let contiguous = window
-                .windows(2)
-                .all(|pair| pair[1].number == pair[0].number + 1 && pair[1].x == pair[0].x + 1);
+            let contiguous = window.windows(2).all(|pair| {
+                pair[1].number == pair[0].number + 1 && pair[1].x.abs_diff(pair[0].x) == 1
+            });
             if !contiguous {
                 continue;
             }
@@ -192,6 +192,23 @@ mod tests {
                 seats,
             },
         };
+
+        let recommendations = recommend(&[showtime], &Preferences::default(), 3);
+
+        let ids: Vec<_> = recommendations[0]
+            .block
+            .iter()
+            .map(|seat| seat.id.as_str())
+            .collect();
+        assert_eq!(ids, ["G5", "G6"]);
+    }
+
+    #[test]
+    fn recommends_a_contiguous_block_with_mirrored_x_coordinates() {
+        let mut showtime = showtime_with_block("mirrored", "Subtitulada", 6, 4);
+        for seat in &mut showtime.seat_map.seats {
+            seat.x = 9 - seat.x;
+        }
 
         let recommendations = recommend(&[showtime], &Preferences::default(), 3);
 

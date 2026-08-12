@@ -272,8 +272,16 @@ fn seat_map_from(layout: SeatLayout) -> Result<SeatMap> {
                 continue;
             };
             for seat in row.seats {
-                let x = u16::try_from(seat.position.column_index)
+                let state = match seat.status {
+                    0 => SeatState::Available,
+                    1 => SeatState::Occupied,
+                    3 => SeatState::Accessible,
+                    5 | 7 => continue,
+                    status => bail!("estado de asiento de Cineplanet desconocido: {status}"),
+                };
+                let source_x = u16::try_from(seat.position.column_index)
                     .context("columna de asiento inválida")?;
+                let x = area_columns.saturating_sub(1).saturating_sub(source_x);
                 let source_y =
                     u16::try_from(seat.position.row_index).context("fila de asiento inválida")?;
                 let y =
@@ -281,14 +289,13 @@ fn seat_map_from(layout: SeatLayout) -> Result<SeatMap> {
                 seats.push(Seat {
                     id: format!("{name}{}", seat.id),
                     row: name.clone(),
-                    number: seat.id.parse().unwrap_or_else(|_| x.saturating_add(1)),
+                    number: seat
+                        .id
+                        .parse()
+                        .unwrap_or_else(|_| source_x.saturating_add(1)),
                     x,
                     y,
-                    state: match seat.status {
-                        0 => SeatState::Available,
-                        3 => SeatState::Accessible,
-                        _ => SeatState::Occupied,
-                    },
+                    state,
                 });
             }
         }
@@ -465,11 +472,204 @@ mod tests {
         let map = seat_map_from(response.seat_layout_data.unwrap()).unwrap();
 
         assert_eq!((map.rows, map.columns), (5, 9));
-        assert_eq!((map.seats[0].x, map.seats[0].y), (0, 4));
-        assert_eq!((map.seats[2].x, map.seats[2].y), (5, 4));
-        assert!(!map.seats.iter().any(|seat| seat.x == 2 && seat.y == 4));
+        assert_eq!((map.seats[0].x, map.seats[0].y), (8, 4));
+        assert_eq!((map.seats[2].x, map.seats[2].y), (3, 4));
+        assert!(!map.seats.iter().any(|seat| seat.x == 6 && seat.y == 4));
         assert_eq!((map.seats[3].x, map.seats[3].y), (4, 1));
         assert_eq!(map.seats[3].state, SeatState::Accessible);
+    }
+
+    #[test]
+    fn normalizes_row_c_to_the_official_mirrored_geometry() {
+        let row_c = [
+            ("4", 0, 3),
+            ("5", 0, 4),
+            ("6", 0, 6),
+            ("7", 0, 7),
+            ("8", 0, 8),
+            ("9", 0, 9),
+            ("10", 0, 10),
+            ("0", 3, 12),
+            ("0", 3, 14),
+            ("16", 0, 16),
+            ("17", 0, 17),
+            ("18", 0, 18),
+            ("19", 0, 19),
+            ("21", 0, 21),
+            ("22", 0, 22),
+            ("23", 0, 23),
+            ("24", 0, 24),
+            ("25", 0, 25),
+            ("26", 0, 26),
+            ("27", 0, 27),
+        ]
+        .into_iter()
+        .map(|(id, status, column_index)| ApiSeat {
+            id: id.into(),
+            status,
+            position: SeatPosition {
+                row_index: 0,
+                column_index,
+            },
+        })
+        .collect();
+        let map = seat_map_from(SeatLayout {
+            areas: vec![SeatArea {
+                number: 1,
+                left: 0,
+                top: 0,
+                column_count: 28,
+                row_count: 1,
+                rows: vec![SeatRow {
+                    physical_name: Some("C".into()),
+                    seats: row_c,
+                }],
+            }],
+        })
+        .unwrap();
+
+        let mut row_c: Vec<_> = map
+            .seats
+            .iter()
+            .filter(|seat| seat.row == "C")
+            .map(|seat| (seat.x, seat.state.clone()))
+            .collect();
+        row_c.sort_by_key(|(x, _)| *x);
+
+        assert_eq!(
+            row_c,
+            vec![
+                (0, SeatState::Available),
+                (1, SeatState::Available),
+                (2, SeatState::Available),
+                (3, SeatState::Available),
+                (4, SeatState::Available),
+                (5, SeatState::Available),
+                (6, SeatState::Available),
+                (8, SeatState::Available),
+                (9, SeatState::Available),
+                (10, SeatState::Available),
+                (11, SeatState::Available),
+                (13, SeatState::Accessible),
+                (15, SeatState::Accessible),
+                (17, SeatState::Available),
+                (18, SeatState::Available),
+                (19, SeatState::Available),
+                (20, SeatState::Available),
+                (21, SeatState::Available),
+                (23, SeatState::Available),
+                (24, SeatState::Available),
+            ]
+        );
+    }
+
+    #[test]
+    fn omits_status_five_placeholders_and_keeps_accessible_seats() {
+        let map = seat_map_from(SeatLayout {
+            areas: vec![SeatArea {
+                number: 1,
+                left: 0,
+                top: 0,
+                column_count: 3,
+                row_count: 1,
+                rows: vec![SeatRow {
+                    physical_name: Some("C".into()),
+                    seats: vec![
+                        ApiSeat {
+                            id: "1".into(),
+                            status: 0,
+                            position: SeatPosition {
+                                row_index: 0,
+                                column_index: 2,
+                            },
+                        },
+                        ApiSeat {
+                            id: "placeholder".into(),
+                            status: 5,
+                            position: SeatPosition {
+                                row_index: 0,
+                                column_index: 1,
+                            },
+                        },
+                        ApiSeat {
+                            id: "2".into(),
+                            status: 3,
+                            position: SeatPosition {
+                                row_index: 0,
+                                column_index: 0,
+                            },
+                        },
+                    ],
+                }],
+            }],
+        })
+        .unwrap();
+
+        assert_eq!(map.seats.len(), 2);
+        assert!(!map.seats.iter().any(|seat| seat.id == "Cplaceholder"));
+        assert!(
+            map.seats
+                .iter()
+                .any(|seat| seat.id == "C2" && seat.state == SeatState::Accessible)
+        );
+    }
+
+    #[test]
+    fn omits_status_seven_sanitized_seats() {
+        let map = seat_map_from(SeatLayout {
+            areas: vec![SeatArea {
+                number: 1,
+                left: 0,
+                top: 0,
+                column_count: 7,
+                row_count: 1,
+                rows: vec![SeatRow {
+                    physical_name: Some("A".into()),
+                    seats: vec![ApiSeat {
+                        id: "8".into(),
+                        status: 7,
+                        position: SeatPosition {
+                            row_index: 0,
+                            column_index: 6,
+                        },
+                    }],
+                }],
+            }],
+        })
+        .unwrap_err();
+
+        assert!(map.to_string().contains("no tiene asientos"));
+    }
+
+    #[test]
+    fn rejects_unknown_seat_statuses_as_a_contract_error() {
+        let error = seat_map_from(SeatLayout {
+            areas: vec![SeatArea {
+                number: 1,
+                left: 0,
+                top: 0,
+                column_count: 1,
+                row_count: 1,
+                rows: vec![SeatRow {
+                    physical_name: Some("A".into()),
+                    seats: vec![ApiSeat {
+                        id: "1".into(),
+                        status: 99,
+                        position: SeatPosition {
+                            row_index: 0,
+                            column_index: 0,
+                        },
+                    }],
+                }],
+            }],
+        })
+        .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("estado de asiento de Cineplanet desconocido: 99")
+        );
     }
 
     #[test]
