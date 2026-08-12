@@ -336,33 +336,6 @@ fn render_results(frame: &mut Frame<'_>, area: Rect, app: &App) {
                 Style::default().fg(SUCCESS).add_modifier(Modifier::BOLD),
             )
         };
-        let (status, status_style) = match app
-            .recommendations()
-            .iter()
-            .find(|recommendation| recommendation.showtime.id == showtime.id)
-            .map(|recommendation| recommendation.quality)
-        {
-            Some(Quality::Excellent) => (
-                "BLOQUE IDEAL",
-                Style::default().fg(SUCCESS).add_modifier(Modifier::BOLD),
-            ),
-            Some(Quality::Good) => (
-                "BLOQUE DISPONIBLE",
-                Style::default().fg(GOLD).add_modifier(Modifier::BOLD),
-            ),
-            Some(Quality::Unfavorable) => (
-                "SIN BLOQUE IDEAL",
-                Style::default().fg(ALERT).add_modifier(Modifier::BOLD),
-            ),
-            None if showtime.seat_map.seats.is_empty() => (
-                "MAPA NO DISPONIBLE",
-                Style::default().fg(MUTED).add_modifier(Modifier::BOLD),
-            ),
-            None => (
-                "SIN BLOQUE RECOMENDADO",
-                Style::default().fg(ALERT).add_modifier(Modifier::BOLD),
-            ),
-        };
         let room_style = if showtime.modality.room_type.eq_ignore_ascii_case("prime") {
             Style::default().fg(PRIME).add_modifier(Modifier::BOLD)
         } else {
@@ -385,23 +358,27 @@ fn render_results(frame: &mut Frame<'_>, area: Rect, app: &App) {
                     Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
                 ),
             ]),
-            Line::from(vec![
-                Span::styled(
-                    format!("[{}] ", showtime.modality.room_type.to_uppercase()),
-                    room_style,
-                ),
-                Span::styled(
-                    format!("[{}] ", showtime.modality.language.to_uppercase()),
-                    language_style,
-                ),
-                Span::styled(
-                    format!("[{}] ", showtime.modality.projection_format.to_uppercase()),
-                    Style::default()
-                        .fg(PLANET_BLUE)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(format!("[{status}]"), status_style),
-            ]),
+            Line::from(
+                [
+                    Span::styled(
+                        format!("[{}] ", showtime.modality.room_type.to_uppercase()),
+                        room_style,
+                    ),
+                    Span::styled(
+                        format!("[{}] ", showtime.modality.language.to_uppercase()),
+                        language_style,
+                    ),
+                    Span::styled(
+                        format!("[{}] ", showtime.modality.projection_format.to_uppercase()),
+                        Style::default()
+                            .fg(PLANET_BLUE)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                ]
+                .into_iter()
+                .chain(result_status_tags(app, showtime))
+                .collect::<Vec<_>>(),
+            ),
         ])
     }));
     if app.result_showtimes().is_empty() {
@@ -413,6 +390,54 @@ fn render_results(frame: &mut Frame<'_>, area: Rect, app: &App) {
         .highlight_style(Style::default().bg(BLUE).add_modifier(Modifier::BOLD))
         .highlight_symbol("› ");
     frame.render_stateful_widget(list, area, &mut state);
+}
+
+fn result_status_tags(app: &App, showtime: &crate::domain::Showtime) -> Vec<Span<'static>> {
+    let bold = Modifier::BOLD;
+    if showtime.seat_map.seats.is_empty() {
+        return vec![Span::styled(
+            "[MAPA NO DISPONIBLE]",
+            Style::default().fg(MUTED).add_modifier(bold),
+        )];
+    }
+
+    let party_size = app.preferences().party_size;
+    let Some(analysis) = app.analyze_showtime(showtime) else {
+        return vec![Span::styled(
+            format!("[SIN {party_size} JUNTOS]"),
+            Style::default().fg(ALERT).add_modifier(bold),
+        )];
+    };
+    if analysis.block.len() != party_size {
+        return vec![Span::styled(
+            format!("[SIN {party_size} JUNTOS]"),
+            Style::default().fg(ALERT).add_modifier(bold),
+        )];
+    }
+
+    let group_tag = if party_size == 1 {
+        "[ASIENTO DISPONIBLE]".to_string()
+    } else {
+        format!("[{party_size} JUNTOS]")
+    };
+    let (zone_tag, zone_style) = match analysis.quality {
+        Quality::Excellent => (
+            "[ZONA IDEAL]",
+            Style::default().fg(SUCCESS).add_modifier(bold),
+        ),
+        Quality::Good => ("[ZONA BUENA]", Style::default().fg(GOLD).add_modifier(bold)),
+        Quality::Unfavorable => (
+            "[ZONA POCO FAVORABLE]",
+            Style::default().fg(ALERT).add_modifier(bold),
+        ),
+    };
+    vec![
+        Span::styled(
+            format!("{group_tag} "),
+            Style::default().fg(TEXT).add_modifier(bold),
+        ),
+        Span::styled(zone_tag, zone_style),
+    ]
 }
 
 fn render_date_filter(frame: &mut Frame<'_>, area: Rect, app: &App) {
@@ -635,7 +660,7 @@ fn render_seat_map(frame: &mut Frame<'_>, area: Rect, app: &App) {
             recommendation
                 .block
                 .iter()
-                .map(|seat| seat.id.as_str())
+                .map(|seat| seat.id.clone())
                 .collect()
         })
         .unwrap_or_default();
@@ -737,23 +762,30 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App) {
 
 #[cfg(test)]
 mod tests {
+    use chrono::Duration;
     use ratatui::{Terminal, backend::TestBackend};
 
     use crate::{
         app::{Action, App, Effect, Screen},
         demo,
-        domain::Preferences,
+        domain::{Catalog, Preferences, Seat, SeatMap, SeatState},
     };
 
     use super::render;
 
     fn app_with_results() -> App {
-        let preferences = Preferences {
-            onboarding_complete: true,
-            city: Some("Lima".into()),
-            ..Preferences::default()
-        };
-        let mut app = App::new(demo::catalog(), preferences);
+        app_with_results_from_catalog(
+            demo::catalog(),
+            Preferences {
+                onboarding_complete: true,
+                city: Some("Lima".into()),
+                ..Preferences::default()
+            },
+        )
+    }
+
+    fn app_with_results_from_catalog(catalog: Catalog, preferences: Preferences) -> App {
+        let mut app = App::new(catalog, preferences);
         app.apply(Action::Confirm).unwrap();
         app.apply(Action::Confirm).unwrap();
 
@@ -782,7 +814,7 @@ mod tests {
     }
 
     fn rendered_lines(app: &App) -> Vec<String> {
-        let backend = TestBackend::new(100, 20);
+        let backend = TestBackend::new(100, 40);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|frame| render(frame, app)).unwrap();
         let buffer = terminal.backend().buffer();
@@ -808,12 +840,208 @@ mod tests {
         assert!(lines[7].contains("REGULAR") || lines[7].contains("PRIME"));
         assert!(lines[7].contains("DOBLADA") || lines[7].contains("SUBTITULADA"));
         assert!(lines[7].contains("2D") || lines[7].contains("3D"));
-        assert!(lines[7].contains("BLOQUE") || lines[7].contains("MAPA"));
+        assert!(
+            lines[7].contains("JUNTOS")
+                || lines[7].contains("ASIENTO")
+                || lines[7].contains("MAPA")
+        );
         assert!(lines[8].contains(&second.starts_at.format("%H:%M").to_string()));
         assert!(
             !lines
                 .iter()
                 .any(|line| line.contains("asientos disponibles"))
         );
+    }
+
+    #[test]
+    fn results_render_group_and_zone_tags_for_each_showtime_analysis() {
+        let mut catalog = demo::catalog();
+        let mut showtimes: Vec<_> = catalog
+            .showtimes
+            .iter()
+            .filter(|showtime| showtime.movie_id == "spider-man")
+            .cloned()
+            .collect();
+        showtimes[0].seat_map = seat_map(&[(6, 4), (6, 5)]);
+        showtimes[1].seat_map = seat_map(&[(3, 4), (3, 5)]);
+        showtimes[2].seat_map = seat_map(&[(9, 0), (9, 1)]);
+        showtimes[3].seat_map = seat_map(&[(6, 4), (6, 6)]);
+        let mut unavailable = showtimes[0].clone();
+        unavailable.id = "map-unavailable".into();
+        unavailable.starts_at += Duration::minutes(1);
+        unavailable.seat_map = SeatMap {
+            rows: 0,
+            columns: 0,
+            seats: Vec::new(),
+        };
+        showtimes.push(unavailable);
+        catalog.showtimes = showtimes;
+
+        let app = app_with_results_from_catalog(
+            catalog,
+            Preferences {
+                onboarding_complete: true,
+                city: Some("Lima".into()),
+                party_size: 2,
+                ..Preferences::default()
+            },
+        );
+        let lines = rendered_lines(&app);
+
+        assert!(lines.iter().any(|line| line.contains("[2 JUNTOS]")));
+        assert!(lines.iter().any(|line| line.contains("[ZONA IDEAL]")));
+        assert!(lines.iter().any(|line| line.contains("[ZONA BUENA]")));
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("[ZONA POCO FAVORABLE]"))
+        );
+        assert!(lines.iter().any(|line| line.contains("[SIN 2 JUNTOS]")));
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("[MAPA NO DISPONIBLE]"))
+        );
+    }
+
+    #[test]
+    fn results_render_a_single_available_seat_tag_for_one_person() {
+        let mut catalog = demo::catalog();
+        catalog
+            .showtimes
+            .retain(|showtime| showtime.movie_id == "spider-man");
+        catalog.showtimes.truncate(1);
+        catalog.showtimes[0].seat_map = seat_map(&[(6, 4)]);
+        let app = app_with_results_from_catalog(
+            catalog,
+            Preferences {
+                onboarding_complete: true,
+                city: Some("Lima".into()),
+                party_size: 1,
+                ..Preferences::default()
+            },
+        );
+
+        assert!(
+            rendered_lines(&app)
+                .iter()
+                .any(|line| line.contains("[ASIENTO DISPONIBLE]"))
+        );
+    }
+
+    #[test]
+    fn results_normalize_a_persisted_zero_person_party_before_rendering() {
+        let app = app_with_results_from_catalog(
+            demo::catalog(),
+            Preferences {
+                onboarding_complete: true,
+                city: Some("Lima".into()),
+                party_size: 0,
+                ..Preferences::default()
+            },
+        );
+
+        assert_eq!(app.preferences().party_size, 1);
+        assert!(
+            rendered_lines(&app)
+                .iter()
+                .all(|line| !line.contains("[SIN 0 JUNTOS]"))
+        );
+    }
+
+    #[test]
+    fn current_map_analysis_keeps_a_block_for_an_unfavorable_result() {
+        let mut catalog = demo::catalog();
+        let mut showtimes: Vec<_> = catalog
+            .showtimes
+            .iter()
+            .filter(|showtime| showtime.movie_id == "spider-man")
+            .cloned()
+            .collect();
+        showtimes.truncate(2);
+        showtimes[0].id = "apt".into();
+        showtimes[0].seat_map = seat_map(&[(6, 4), (6, 5)]);
+        showtimes[1].id = "unfavorable".into();
+        showtimes[1].seat_map = seat_map(&[(9, 0), (9, 1)]);
+        catalog.showtimes = showtimes;
+
+        let mut app = app_with_results_from_catalog(
+            catalog,
+            Preferences {
+                onboarding_complete: true,
+                city: Some("Lima".into()),
+                party_size: 2,
+                ..Preferences::default()
+            },
+        );
+        assert_eq!(app.recommendations().len(), 1);
+        assert_eq!(app.recommendations()[0].showtime.id, "apt");
+
+        let unfavorable_index = app
+            .result_showtimes()
+            .iter()
+            .position(|showtime| showtime.id == "unfavorable")
+            .unwrap();
+        for _ in 0..=unfavorable_index {
+            app.apply(Action::Down).unwrap();
+        }
+        app.apply(Action::Confirm).unwrap();
+        assert_eq!(app.screen(), Screen::SeatMap);
+
+        let analysis = app.current_recommendation().unwrap();
+        assert_eq!(analysis.quality, crate::domain::Quality::Unfavorable);
+        assert_eq!(analysis.block.len(), 2);
+        assert_eq!(analysis.showtime.id, "unfavorable");
+    }
+
+    #[test]
+    fn results_show_no_group_tag_for_a_nonempty_map_with_zero_available_seats() {
+        let mut catalog = demo::catalog();
+        catalog
+            .showtimes
+            .retain(|showtime| showtime.movie_id == "spider-man");
+        catalog.showtimes.truncate(1);
+        catalog.showtimes[0].seat_map = seat_map(&[]);
+        let app = app_with_results_from_catalog(
+            catalog,
+            Preferences {
+                onboarding_complete: true,
+                city: Some("Lima".into()),
+                party_size: 2,
+                ..Preferences::default()
+            },
+        );
+
+        let lines = rendered_lines(&app);
+        assert!(lines.iter().any(|line| line.contains("[SIN 2 JUNTOS]")));
+        assert!(
+            lines
+                .iter()
+                .all(|line| !line.contains("[MAPA NO DISPONIBLE]"))
+        );
+    }
+
+    fn seat_map(available: &[(u16, u16)]) -> SeatMap {
+        let seats = (0..10)
+            .flat_map(|y| {
+                (0..10).map(move |x| Seat {
+                    id: format!("{}{}", (b'A' + y as u8) as char, x + 1),
+                    row: ((b'A' + y as u8) as char).to_string(),
+                    number: x + 1,
+                    x,
+                    y,
+                    state: if available.contains(&(y, x)) {
+                        SeatState::Available
+                    } else {
+                        SeatState::Occupied
+                    },
+                })
+            })
+            .collect();
+        SeatMap {
+            rows: 10,
+            columns: 10,
+            seats,
+        }
     }
 }

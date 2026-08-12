@@ -75,8 +75,9 @@ impl App {
         Self::with_mode(catalog, preferences, false)
     }
 
-    fn with_mode(catalog: Catalog, preferences: Preferences, is_demo: bool) -> Self {
-        let party_size_index = preferences.party_size.clamp(1, 5) - 1;
+    fn with_mode(catalog: Catalog, mut preferences: Preferences, is_demo: bool) -> Self {
+        preferences.party_size = preferences.party_size.clamp(1, 5);
+        let party_size_index = preferences.party_size - 1;
         Self {
             catalog,
             preferences,
@@ -120,6 +121,10 @@ impl App {
 
     pub fn recommendations(&self) -> &[Recommendation] {
         &self.recommendations
+    }
+
+    pub fn analyze_showtime(&self, showtime: &crate::domain::Showtime) -> Option<Recommendation> {
+        ranking::analyze_showtime(showtime, &self.preferences)
     }
 
     pub fn result_showtimes(&self) -> &[crate::domain::Showtime] {
@@ -262,11 +267,9 @@ impl App {
             .collect()
     }
 
-    pub fn current_recommendation(&self) -> Option<&Recommendation> {
+    pub fn current_recommendation(&self) -> Option<Recommendation> {
         let showtime = self.current_result_showtime()?;
-        self.recommendations
-            .iter()
-            .find(|recommendation| recommendation.showtime.id == showtime.id)
+        self.analyze_showtime(showtime)
     }
 
     pub fn current_result_showtime(&self) -> Option<&crate::domain::Showtime> {

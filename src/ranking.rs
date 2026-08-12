@@ -40,6 +40,13 @@ pub fn recommend(
     recommendations
 }
 
+pub fn analyze_showtime(showtime: &Showtime, preferences: &Preferences) -> Option<Recommendation> {
+    if preferences.party_size == 0 {
+        return None;
+    }
+    best_recommendation(showtime, preferences)
+}
+
 fn best_recommendation(showtime: &Showtime, preferences: &Preferences) -> Option<Recommendation> {
     let mut rows: BTreeMap<&str, Vec<&Seat>> = BTreeMap::new();
     for seat in &showtime.seat_map.seats {
@@ -149,7 +156,7 @@ mod tests {
 
     use crate::domain::{Modality, Preferences, Seat, SeatMap, SeatState, Showtime};
 
-    use super::recommend;
+    use super::{analyze_showtime, recommend};
 
     #[test]
     fn recommends_the_contiguous_block_closest_to_the_ideal_viewing_point() {
@@ -281,6 +288,33 @@ mod tests {
 
         assert_eq!(recommendations.len(), 1);
         assert_eq!(recommendations[0].showtime.id, "apt");
+    }
+
+    #[test]
+    fn analyzes_an_unfavorable_showtime_even_when_recommend_hides_it() {
+        let apt = showtime_with_block("apt", "Subtitulada", 6, 4);
+        let unfavorable = showtime_with_block("unfavorable", "Subtitulada", 9, 0);
+        let preferences = Preferences::default();
+
+        assert_eq!(
+            recommend(&[apt, unfavorable.clone()], &preferences, 3).len(),
+            1
+        );
+
+        let analysis = analyze_showtime(&unfavorable, &preferences).unwrap();
+        assert_eq!(analysis.quality, crate::domain::Quality::Unfavorable);
+        assert_eq!(analysis.showtime.id, "unfavorable");
+    }
+
+    #[test]
+    fn does_not_analyze_a_zero_person_party() {
+        let showtime = showtime_with_block("showtime", "Subtitulada", 6, 4);
+        let preferences = Preferences {
+            party_size: 0,
+            ..Preferences::default()
+        };
+
+        assert!(analyze_showtime(&showtime, &preferences).is_none());
     }
 
     #[test]
