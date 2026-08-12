@@ -18,6 +18,11 @@ const PLANET_BLUE: Color = Color::Rgb(86, 137, 207);
 const GOLD: Color = Color::Rgb(255, 177, 47);
 const TEXT: Color = Color::Rgb(244, 247, 252);
 const MUTED: Color = Color::Rgb(184, 196, 216);
+const SUCCESS: Color = Color::Rgb(112, 214, 142);
+const ALERT: Color = Color::Rgb(242, 112, 112);
+const PRIME: Color = Color::Rgb(226, 170, 255);
+const DUBBED: Color = Color::Rgb(105, 207, 255);
+const SUBTITLED: Color = Color::Rgb(126, 220, 183);
 
 const WELCOME_SUBTITLE: &str = "Cartelera y asientos de Cineplanet";
 const WELCOME_TAGLINE: &str = "Encuentra tu mejor función";
@@ -315,22 +320,58 @@ fn render_results(frame: &mut Frame<'_>, area: Rect, app: &App) {
     ])];
     items.extend(app.result_showtimes().iter().map(|showtime| {
         let available = app.available_seat_count(showtime);
-        let availability = if showtime.seat_map.seats.is_empty() {
-            "mapa pendiente".to_string()
+        let (availability, availability_style) = if showtime.seat_map.seats.is_empty() {
+            (
+                "SIN CONFIRMAR".to_string(),
+                Style::default().fg(MUTED).add_modifier(Modifier::BOLD),
+            )
+        } else if available == 0 {
+            (
+                "0 asientos".to_string(),
+                Style::default().fg(ALERT).add_modifier(Modifier::BOLD),
+            )
         } else {
-            format!("{available:>3} asientos")
+            (
+                format!("{available} asientos"),
+                Style::default().fg(SUCCESS).add_modifier(Modifier::BOLD),
+            )
         };
-        let status = match app
+        let (status, status_style) = match app
             .recommendations()
             .iter()
             .find(|recommendation| recommendation.showtime.id == showtime.id)
             .map(|recommendation| recommendation.quality)
         {
-            Some(Quality::Excellent) => "Buen bloque",
-            Some(Quality::Good) => "Bloque disponible",
-            Some(Quality::Unfavorable) => "Sin bloque ideal",
-            None if showtime.seat_map.seats.is_empty() => "Mapa no disponible",
-            None => "Sin bloque recomendado",
+            Some(Quality::Excellent) => (
+                "BLOQUE IDEAL",
+                Style::default().fg(SUCCESS).add_modifier(Modifier::BOLD),
+            ),
+            Some(Quality::Good) => (
+                "BLOQUE DISPONIBLE",
+                Style::default().fg(GOLD).add_modifier(Modifier::BOLD),
+            ),
+            Some(Quality::Unfavorable) => (
+                "SIN BLOQUE IDEAL",
+                Style::default().fg(ALERT).add_modifier(Modifier::BOLD),
+            ),
+            None if showtime.seat_map.seats.is_empty() => (
+                "MAPA NO DISPONIBLE",
+                Style::default().fg(MUTED).add_modifier(Modifier::BOLD),
+            ),
+            None => (
+                "SIN BLOQUE RECOMENDADO",
+                Style::default().fg(ALERT).add_modifier(Modifier::BOLD),
+            ),
+        };
+        let room_style = if showtime.modality.room_type.eq_ignore_ascii_case("prime") {
+            Style::default().fg(PRIME).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(MUTED).add_modifier(Modifier::BOLD)
+        };
+        let language_style = if showtime.modality.language.eq_ignore_ascii_case("doblada") {
+            Style::default().fg(DUBBED).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(SUBTITLED).add_modifier(Modifier::BOLD)
         };
         ListItem::new(vec![
             Line::from(vec![
@@ -338,26 +379,29 @@ fn render_results(frame: &mut Frame<'_>, area: Rect, app: &App) {
                     format!("{}  ", showtime.starts_at.format("%H:%M")),
                     Style::default().fg(GOLD).add_modifier(Modifier::BOLD),
                 ),
+                Span::styled(format!("{availability}  "), availability_style),
                 Span::styled(
-                    format!("{availability}  "),
-                    Style::default().add_modifier(Modifier::BOLD),
+                    &showtime.venue_name,
+                    Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(&showtime.venue_name, Style::default().fg(TEXT)),
             ]),
-            Line::from(format!(
-                "{} · {} · {} · {status}",
-                showtime.modality.projection_format,
-                showtime.modality.language,
-                showtime.modality.room_type,
-            )),
-            Line::from(Span::styled(
-                if showtime.seat_map.seats.is_empty() {
-                    "Disponibilidad no confirmada".to_string()
-                } else {
-                    format!("{available} asientos disponibles")
-                },
-                Style::default().fg(MUTED),
-            )),
+            Line::from(vec![
+                Span::styled(
+                    format!("[{}] ", showtime.modality.room_type.to_uppercase()),
+                    room_style,
+                ),
+                Span::styled(
+                    format!("[{}] ", showtime.modality.language.to_uppercase()),
+                    language_style,
+                ),
+                Span::styled(
+                    format!("[{}] ", showtime.modality.projection_format.to_uppercase()),
+                    Style::default()
+                        .fg(PLANET_BLUE)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(format!("[{status}]"), status_style),
+            ]),
         ])
     }));
     if app.result_showtimes().is_empty() {
@@ -366,7 +410,7 @@ fn render_results(frame: &mut Frame<'_>, area: Rect, app: &App) {
     let mut state = ListState::default().with_selected(Some(app.result_index()));
     let list = List::new(items)
         .block(Block::default().borders(Borders::ALL).title(title))
-        .highlight_style(Style::default().fg(Color::White).bg(BLUE))
+        .highlight_style(Style::default().bg(BLUE).add_modifier(Modifier::BOLD))
         .highlight_symbol("› ");
     frame.render_stateful_widget(list, area, &mut state);
 }
@@ -689,4 +733,87 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App) {
             .style(Style::default().fg(MUTED)),
         area,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::{Terminal, backend::TestBackend};
+
+    use crate::{
+        app::{Action, App, Effect, Screen},
+        demo,
+        domain::Preferences,
+    };
+
+    use super::render;
+
+    fn app_with_results() -> App {
+        let preferences = Preferences {
+            onboarding_complete: true,
+            city: Some("Lima".into()),
+            ..Preferences::default()
+        };
+        let mut app = App::new(demo::catalog(), preferences);
+        app.apply(Action::Confirm).unwrap();
+        app.apply(Action::Confirm).unwrap();
+
+        for _ in 0..app.filter_dates().len() {
+            app.apply(Action::Toggle).unwrap();
+            app.apply(Action::Down).unwrap();
+        }
+        app.apply(Action::Confirm).unwrap();
+        for _ in 0..app.filter_venues().len() {
+            app.apply(Action::Toggle).unwrap();
+            app.apply(Action::Down).unwrap();
+        }
+        app.apply(Action::Confirm).unwrap();
+        while !app.party_size_on_continue() {
+            app.apply(Action::Down).unwrap();
+        }
+        assert_eq!(app.apply(Action::Confirm).unwrap(), Effect::SavePreferences);
+        assert!(matches!(
+            app.apply(Action::Confirm).unwrap(),
+            Effect::FetchSeatMaps(_)
+        ));
+        let showtimes = app.showtimes_to_hydrate();
+        app.finish_loading_showtimes(showtimes);
+        assert_eq!(app.screen(), Screen::Results);
+        app
+    }
+
+    fn rendered_lines(app: &App) -> Vec<String> {
+        let backend = TestBackend::new(100, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        (0..buffer.area.height)
+            .map(|y| {
+                (0..buffer.area.width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn results_render_each_showtime_as_two_labeled_lines() {
+        let app = app_with_results();
+        let lines = rendered_lines(&app);
+        let first = &app.result_showtimes()[0];
+        let second = &app.result_showtimes()[1];
+
+        assert!(lines[6].contains(&first.starts_at.format("%H:%M").to_string()));
+        assert!(lines[6].contains("asientos"));
+        assert!(lines[6].contains(&first.venue_name));
+        assert!(lines[7].contains("REGULAR") || lines[7].contains("PRIME"));
+        assert!(lines[7].contains("DOBLADA") || lines[7].contains("SUBTITULADA"));
+        assert!(lines[7].contains("2D") || lines[7].contains("3D"));
+        assert!(lines[7].contains("BLOQUE") || lines[7].contains("MAPA"));
+        assert!(lines[8].contains(&second.starts_at.format("%H:%M").to_string()));
+        assert!(
+            !lines
+                .iter()
+                .any(|line| line.contains("asientos disponibles"))
+        );
+    }
 }
