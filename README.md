@@ -14,17 +14,16 @@ Encuentra funciones de Cineplanet con buenos asientos, sin revisar sede por sede
 ┌ CineplanetCLI ───────────────────────────────────────────┐
 │ Película: Spider-Man                                    │
 │ Grupo: 2 personas                                       │
-├ Mejores funciones ──────────────────────────────────────┤
-│ > Excelente  CP La Molina   Hoy 20:30   2D Subtitulada  │
-│   Buena      CP Alcázar     Mañana 19:30   2D           │
-│   Buena      CP Salaverry   Martes 21:00   Prime        │
-└ ↑↓ elegir  Enter abrir  F filtros  Q salir ─────────────┘
+├ Funciones disponibles ──────────────────────────────────┤
+│ > 20:30  55 asientos  CP La Molina                       │
+│   21:00  18 asientos  CP Salaverry                       │
+└ ↑↓ elegir  Enter ver o modificar  Esc volver  Q salir ─┘
 ```
 
 ## Qué hace
 
 - Recorre la cartelera publicada por Cineplanet.
-- Compara sedes, fechas, horarios y modalidades.
+- Lista las funciones consultadas con sus asientos disponibles observados.
 - Busca bloques contiguos cerca del centro y la zona media-trasera.
 - Explica por qué recomienda cada función.
 - Mantiene la compra y la reserva en la web de Cineplanet.
@@ -32,7 +31,7 @@ Encuentra funciones de Cineplanet con buenos asientos, sin revisar sede por sede
 ## Flujo
 
 ```text
-Película → preferencias → análisis → top 3 → mapa de sala → Cineplanet
+Película → fecha(s) → sede(s) → grupo (1–5) → confirmar búsqueda → funciones → mapa
 ```
 
 La experiencia será una TUI navegable con flechas, Enter, Escape y selectores múltiples. No requerirá memorizar comandos.
@@ -46,7 +45,9 @@ En desarrollo temprano.
 - [x] Preferencias persistentes y onboarding de sedes
 - [x] Adaptador HTTP público de Cineplanet: cartelera, sedes, funciones y mapas
 - [x] Flujo TUI interactivo con pantalla de bienvenida
-- [ ] Filtros interactivos de fecha, hora y modalidad
+- [x] Selección guiada de fechas, sedes y grupo antes de consultar asientos
+- [x] Alternativas con asientos disponibles cuando no hay bloque contiguo
+- [ ] Filtros de horario y modalidad
 - [ ] Revalidación y entrega a Cineplanet
 
 El runtime será determinista: sin LLM y sin navegador oculto durante el uso normal.
