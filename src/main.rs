@@ -46,7 +46,7 @@ fn run(
             Effect::SavePreferences => settings::save(app.preferences())?,
             Effect::FetchSeatMaps(_) => {
                 terminal.draw(|frame| ui::render(frame, app))?;
-                let showtimes = app.selected_showtimes();
+                let showtimes = app.showtimes_to_hydrate();
                 let hydrated = match client {
                     Some(client) => runtime.block_on(client.hydrate_showtimes(&showtimes)),
                     None => Ok(showtimes),
@@ -68,8 +68,6 @@ fn action_for(key: KeyEvent) -> Option<Action> {
     match (key.code, key.modifiers) {
         (KeyCode::Char('c'), KeyModifiers::CONTROL) => Some(Action::Quit),
         (KeyCode::Char('Q'), _) => Some(Action::Quit),
-        (KeyCode::Char('P'), _) => Some(Action::EditVenues),
-        (KeyCode::Char('F'), _) => Some(Action::OpenFilters),
         (KeyCode::Char(' '), _) => Some(Action::Toggle),
         (KeyCode::Char(character), _) => Some(Action::Character(character)),
         (KeyCode::Up, _) => Some(Action::Up),
@@ -100,16 +98,12 @@ mod tests {
             Some(Action::Character('f'))
         );
         assert_eq!(
-            action_for(KeyEvent::new(KeyCode::Char('P'), KeyModifiers::SHIFT)),
-            Some(Action::EditVenues)
-        );
-        assert_eq!(
             action_for(KeyEvent::new(KeyCode::Char('Q'), KeyModifiers::SHIFT)),
             Some(Action::Quit)
         );
         assert_eq!(
             action_for(KeyEvent::new(KeyCode::Char('F'), KeyModifiers::SHIFT)),
-            Some(Action::OpenFilters)
+            Some(Action::Character('F'))
         );
     }
 }

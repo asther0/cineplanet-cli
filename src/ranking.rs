@@ -83,7 +83,9 @@ fn best_recommendation(showtime: &Showtime, preferences: &Preferences) -> Option
         }
     }
 
-    let (seat_score, block) = best?;
+    let Some((seat_score, block)) = best else {
+        return fallback_recommendation(showtime, preferences);
+    };
     let quality = if seat_score >= 90.0 {
         Quality::Excellent
     } else if seat_score >= 72.0 {
@@ -105,6 +107,37 @@ fn best_recommendation(showtime: &Showtime, preferences: &Preferences) -> Option
         showtime: showtime.clone(),
         block,
         quality,
+        reasons,
+        score,
+    })
+}
+
+fn fallback_recommendation(
+    showtime: &Showtime,
+    preferences: &Preferences,
+) -> Option<Recommendation> {
+    let available: Vec<_> = showtime
+        .seat_map
+        .seats
+        .iter()
+        .filter(|seat| seat.state == SeatState::Available)
+        .cloned()
+        .collect();
+    let representative = available.first()?.clone();
+    let available_count = available.len();
+    let mut reasons = vec![format!(
+        "Sin bloque contiguo para {} personas; quedan {available_count} asientos disponibles",
+        preferences.party_size
+    )];
+    let mut score = available_count as f64;
+    if preferences.favorite_venue_ids.contains(&showtime.venue_id) {
+        reasons.push("Sede favorita".into());
+        score += 8.0;
+    }
+    Some(Recommendation {
+        showtime: showtime.clone(),
+        block: vec![representative],
+        quality: Quality::Unfavorable,
         reasons,
         score,
     })
@@ -243,6 +276,29 @@ mod tests {
         assert_eq!(
             recommendations[0].quality,
             crate::domain::Quality::Unfavorable
+        );
+    }
+
+    #[test]
+    fn keeps_available_showtimes_when_the_group_has_no_contiguous_block() {
+        let showtime = showtime_with_block("split", "Subtitulada", 6, 4);
+        let preferences = Preferences {
+            party_size: 3,
+            ..Preferences::default()
+        };
+
+        let recommendations = recommend(&[showtime], &preferences, 3);
+
+        assert_eq!(recommendations.len(), 1);
+        assert_eq!(
+            recommendations[0].quality,
+            crate::domain::Quality::Unfavorable
+        );
+        assert!(
+            recommendations[0]
+                .reasons
+                .iter()
+                .any(|reason| reason.contains("Sin bloque contiguo para 3 personas"))
         );
     }
 

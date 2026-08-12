@@ -14,8 +14,10 @@ use crate::{
 };
 
 const BLUE: Color = Color::Rgb(16, 70, 135);
-const PLANET_BLUE: Color = Color::Rgb(1, 42, 99);
+const PLANET_BLUE: Color = Color::Rgb(86, 137, 207);
 const GOLD: Color = Color::Rgb(255, 177, 47);
+const TEXT: Color = Color::Rgb(244, 247, 252);
+const MUTED: Color = Color::Rgb(184, 196, 216);
 
 const WELCOME_SUBTITLE: &str = "Cartelera y asientos de Cineplanet";
 const WELCOME_TAGLINE: &str = "Encuentra tu mejor función";
@@ -35,9 +37,12 @@ pub fn render(frame: &mut Frame<'_>, app: &App) {
         Screen::CitySetup => render_city_setup(frame, body, app),
         Screen::VenueSetup => render_venues(frame, body, app),
         Screen::Movies => render_movies(frame, body, app),
+        Screen::DateFilter => render_date_filter(frame, body, app),
+        Screen::VenueFilter => render_venue_filter(frame, body, app),
+        Screen::PartySize => render_party_size(frame, body, app),
+        Screen::SearchSummary => render_search_summary(frame, body, app),
         Screen::Loading => render_loading(frame, body),
         Screen::Results => render_results(frame, body, app),
-        Screen::Filters => render_filters(frame, body, app),
         Screen::SeatMap => render_seat_map(frame, body, app),
     }
     render_footer(frame, footer, app);
@@ -83,7 +88,7 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, app: &App) {
                 Style::default().fg(GOLD).add_modifier(Modifier::BOLD),
             )
         },
-        Span::styled(movie, Style::default().fg(Color::DarkGray)),
+        Span::styled(movie, Style::default().fg(MUTED)),
     ]);
     frame.render_widget(
         Paragraph::new(title).block(Block::default().borders(Borders::BOTTOM)),
@@ -92,19 +97,6 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, app: &App) {
 }
 
 fn render_welcome(frame: &mut Frame<'_>, area: Rect) {
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(GOLD))
-        .title(Line::from(vec![Span::styled(
-            " Bienvenido ",
-            Style::default()
-                .fg(Color::Black)
-                .bg(GOLD)
-                .add_modifier(Modifier::BOLD),
-        )]));
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-
     let mut lines = welcome_brand();
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
@@ -114,17 +106,17 @@ fn render_welcome(frame: &mut Frame<'_>, area: Rect) {
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
         WELCOME_TAGLINE,
-        Style::default().add_modifier(Modifier::BOLD),
+        Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
     )));
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
         WELCOME_INSTRUCTIONS,
-        Style::default().fg(Color::DarkGray),
+        Style::default().fg(MUTED).add_modifier(Modifier::BOLD),
     )));
 
     let [content] = Layout::vertical([Constraint::Length(lines.len() as u16)])
         .flex(Flex::Center)
-        .areas(inner);
+        .areas(area);
     frame.render_widget(Paragraph::new(lines).alignment(Alignment::Center), content);
 }
 
@@ -284,7 +276,7 @@ fn render_movies(frame: &mut Frame<'_>, area: Rect, app: &App) {
                     &movie.title,
                     Style::default().add_modifier(Modifier::BOLD),
                 )),
-                Line::from(Span::styled(metadata, Style::default().fg(Color::DarkGray))),
+                Line::from(Span::styled(metadata, Style::default().fg(MUTED))),
             ])
         })
         .collect();
@@ -301,61 +293,76 @@ fn render_movies(frame: &mut Frame<'_>, area: Rect, app: &App) {
 }
 
 fn render_results(frame: &mut Frame<'_>, area: Rect, app: &App) {
-    if app.recommendations().is_empty() {
-        frame.render_widget(
-            Paragraph::new("No encontramos bloques contiguos para este grupo.")
-                .alignment(Alignment::Center)
-                .block(Block::default().borders(Borders::ALL).title(" Resultados ")),
-            area,
-        );
-        return;
-    }
-
     let title = if app.filters_active() {
         format!(
-            " Mejores funciones ({} fechas, {} sedes) ",
+            " Funciones disponibles ({} fechas, {} sedes) ",
             app.selected_filter_dates().len(),
             app.selected_filter_venues().len()
         )
     } else {
-        " Mejores funciones ".to_string()
+        " Funciones disponibles ".to_string()
     };
 
-    let items: Vec<_> = app
-        .recommendations()
-        .iter()
-        .map(|recommendation| {
-            let quality = match recommendation.quality {
-                Quality::Excellent => "Excelente",
-                Quality::Good => "Buena",
-                Quality::Unfavorable => "Menos favorable",
-            };
-            let showtime = &recommendation.showtime;
-            ListItem::new(vec![
-                Line::from(vec![
-                    Span::styled(
-                        format!("{quality:<16}"),
-                        Style::default().fg(GOLD).add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        &showtime.venue_name,
-                        Style::default().add_modifier(Modifier::BOLD),
-                    ),
-                ]),
-                Line::from(format!(
-                    "{} · {} · {} · {}",
-                    showtime.starts_at.format("%d/%m %H:%M"),
-                    showtime.modality.projection_format,
-                    showtime.modality.language,
-                    showtime.modality.room_type,
-                )),
-                Line::from(Span::styled(
-                    recommendation.reasons.join(" · "),
-                    Style::default().fg(Color::DarkGray),
-                )),
-            ])
-        })
-        .collect();
+    let mut items = vec![ListItem::new(vec![
+        Line::from(Span::styled(
+            "Modificar búsqueda",
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            "Cambiar fechas o sedes antes de volver a consultar.",
+            Style::default().fg(MUTED),
+        )),
+    ])];
+    items.extend(app.result_showtimes().iter().map(|showtime| {
+        let available = app.available_seat_count(showtime);
+        let availability = if showtime.seat_map.seats.is_empty() {
+            "mapa pendiente".to_string()
+        } else {
+            format!("{available:>3} asientos")
+        };
+        let status = match app
+            .recommendations()
+            .iter()
+            .find(|recommendation| recommendation.showtime.id == showtime.id)
+            .map(|recommendation| recommendation.quality)
+        {
+            Some(Quality::Excellent) => "Buen bloque",
+            Some(Quality::Good) => "Bloque disponible",
+            Some(Quality::Unfavorable) => "Sin bloque ideal",
+            None if showtime.seat_map.seats.is_empty() => "Mapa no disponible",
+            None => "Sin bloque recomendado",
+        };
+        ListItem::new(vec![
+            Line::from(vec![
+                Span::styled(
+                    format!("{}  ", showtime.starts_at.format("%H:%M")),
+                    Style::default().fg(GOLD).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("{availability}  "),
+                    Style::default().add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(&showtime.venue_name, Style::default().fg(TEXT)),
+            ]),
+            Line::from(format!(
+                "{} · {} · {} · {status}",
+                showtime.modality.projection_format,
+                showtime.modality.language,
+                showtime.modality.room_type,
+            )),
+            Line::from(Span::styled(
+                if showtime.seat_map.seats.is_empty() {
+                    "Disponibilidad no confirmada".to_string()
+                } else {
+                    format!("{available} asientos disponibles")
+                },
+                Style::default().fg(MUTED),
+            )),
+        ])
+    }));
+    if app.result_showtimes().is_empty() {
+        items.push(ListItem::new("No hay funciones para esta combinación."));
+    }
     let mut state = ListState::default().with_selected(Some(app.result_index()));
     let list = List::new(items)
         .block(Block::default().borders(Borders::ALL).title(title))
@@ -364,9 +371,8 @@ fn render_results(frame: &mut Frame<'_>, area: Rect, app: &App) {
     frame.render_stateful_widget(list, area, &mut state);
 }
 
-fn render_filters(frame: &mut Frame<'_>, area: Rect, app: &App) {
-    let mut items: Vec<ListItem> = Vec::new();
-
+fn render_date_filter(frame: &mut Frame<'_>, area: Rect, app: &App) {
+    let mut items = Vec::new();
     for date in app.filter_dates() {
         let checked = app.selected_filter_dates().contains(date);
         let label = if let Ok(parsed) = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d") {
@@ -381,6 +387,41 @@ fn render_filters(frame: &mut Frame<'_>, area: Rect, app: &App) {
         )));
     }
 
+    let continue_style = if app.date_filter_on_continue() {
+        if app.has_selected_dates() {
+            Style::default()
+                .fg(Color::White)
+                .bg(BLUE)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(MUTED)
+        }
+    } else {
+        Style::default().add_modifier(Modifier::BOLD)
+    };
+    items.push(ListItem::new(Line::from(Span::styled(
+        "Continuar",
+        continue_style,
+    ))));
+    let mut state = ListState::default().with_selected(Some(app.date_filter_index()));
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" ¿Qué fechas te funcionan? "),
+        )
+        .highlight_style(
+            Style::default()
+                .fg(Color::White)
+                .bg(BLUE)
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol("› ");
+    frame.render_stateful_widget(list, area, &mut state);
+}
+
+fn render_venue_filter(frame: &mut Frame<'_>, area: Rect, app: &App) {
+    let mut items = Vec::new();
     for venue_id in app.filter_venues() {
         let checked = app.selected_filter_venues().contains(venue_id);
         let venue_name = app
@@ -397,22 +438,30 @@ fn render_filters(frame: &mut Frame<'_>, area: Rect, app: &App) {
         )));
     }
 
-    let apply_style = if app.filter_on_apply() {
-        Style::default()
-            .fg(Color::White)
-            .bg(BLUE)
-            .add_modifier(Modifier::BOLD)
+    let continue_style = if app.venue_filter_on_continue() {
+        if app.has_selected_venues() {
+            Style::default()
+                .fg(Color::White)
+                .bg(BLUE)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(MUTED)
+        }
     } else {
         Style::default().add_modifier(Modifier::BOLD)
     };
     items.push(ListItem::new(Line::from(Span::styled(
-        "Aplicar filtros",
-        apply_style,
+        "Continuar",
+        continue_style,
     ))));
 
-    let mut state = ListState::default().with_selected(Some(app.filter_cursor()));
+    let mut state = ListState::default().with_selected(Some(app.venue_filter_index()));
     let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title(" Filtros "))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" ¿En qué sedes? "),
+        )
         .highlight_style(
             Style::default()
                 .fg(Color::White)
@@ -423,16 +472,129 @@ fn render_filters(frame: &mut Frame<'_>, area: Rect, app: &App) {
     frame.render_stateful_widget(list, area, &mut state);
 }
 
+fn render_party_size(frame: &mut Frame<'_>, area: Rect, app: &App) {
+    let mut items: Vec<_> = (1..=5)
+        .map(|size| {
+            let marker = if app.preferences().party_size == size {
+                "(actual) "
+            } else {
+                ""
+            };
+            ListItem::new(format!(
+                "{marker}{size} {}",
+                if size == 1 { "persona" } else { "personas" }
+            ))
+        })
+        .collect();
+    let continue_style = if app.party_size_on_continue() {
+        Style::default()
+            .fg(Color::White)
+            .bg(BLUE)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().add_modifier(Modifier::BOLD)
+    };
+    items.push(ListItem::new(Line::from(Span::styled(
+        "Continuar",
+        continue_style,
+    ))));
+    let mut state = ListState::default().with_selected(Some(app.party_size_index()));
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" ¿Cuántas personas irán? "),
+        )
+        .highlight_style(
+            Style::default()
+                .fg(Color::White)
+                .bg(BLUE)
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol("› ");
+    frame.render_stateful_widget(list, area, &mut state);
+}
+
+fn render_search_summary(frame: &mut Frame<'_>, area: Rect, app: &App) {
+    let dates = app
+        .filter_dates()
+        .iter()
+        .filter(|date| app.selected_filter_dates().contains(*date))
+        .map(|date| date.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let venues = app
+        .filter_venues()
+        .iter()
+        .filter(|id| app.selected_filter_venues().contains(*id))
+        .filter_map(|id| app.catalog().venues.iter().find(|venue| venue.id == *id))
+        .map(|venue| venue.name.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let movie = app
+        .current_movie()
+        .map(|movie| movie.title.as_str())
+        .unwrap_or("-");
+    let lines = vec![
+        Line::from(Span::styled(
+            "Revisa tu búsqueda",
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(format!("Película: {movie}")),
+        Line::from(format!("Fechas: {dates}")),
+        Line::from(format!("Sedes: {venues}")),
+        Line::from(format!("Grupo: {} personas", app.preferences().party_size)),
+        Line::from(""),
+        Line::from(Span::styled(
+            "[ Buscar funciones ]",
+            Style::default()
+                .fg(Color::White)
+                .bg(BLUE)
+                .add_modifier(Modifier::BOLD),
+        )),
+    ];
+    frame.render_widget(
+        Paragraph::new(lines)
+            .alignment(Alignment::Center)
+            .wrap(Wrap { trim: true })
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" Listo para consultar "),
+            ),
+        area,
+    );
+}
+
 fn render_seat_map(frame: &mut Frame<'_>, area: Rect, app: &App) {
-    let Some(recommendation) = app.current_recommendation() else {
+    let Some(showtime) = app.current_result_showtime() else {
         return;
     };
-    let map = &recommendation.showtime.seat_map;
-    let recommended: BTreeSet<_> = recommendation
-        .block
-        .iter()
-        .map(|seat| seat.id.as_str())
-        .collect();
+    let map = &showtime.seat_map;
+    if map.seats.is_empty() {
+        frame.render_widget(
+            Paragraph::new("Cineplanet no pudo confirmar el mapa de esta función.")
+                .alignment(Alignment::Center)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(" Mapa de sala "),
+                ),
+            area,
+        );
+        return;
+    }
+    let recommended: BTreeSet<_> = app
+        .current_recommendation()
+        .map(|recommendation| {
+            recommendation
+                .block
+                .iter()
+                .map(|seat| seat.id.as_str())
+                .collect()
+        })
+        .unwrap_or_default();
 
     let mut lines = vec![
         Line::from(Span::styled(
@@ -447,10 +609,10 @@ fn render_seat_map(frame: &mut Frame<'_>, area: Rect, app: &App) {
             .iter()
             .find(|seat| seat.y == y)
             .map(|seat| seat.row.as_str())
-            .unwrap_or("?");
+            .unwrap_or("");
         let mut spans = vec![Span::styled(
             format!("{row_label:>2}  "),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(MUTED),
         )];
         for x in 0..map.columns {
             let Some(seat) = map.seats.iter().find(|seat| seat.x == x && seat.y == y) else {
@@ -462,7 +624,7 @@ fn render_seat_map(frame: &mut Frame<'_>, area: Rect, app: &App) {
             } else {
                 match seat.state {
                     SeatState::Available => ("□  ", Style::default().fg(Color::Blue)),
-                    SeatState::Occupied => ("■  ", Style::default().fg(Color::DarkGray)),
+                    SeatState::Occupied => ("■  ", Style::default().fg(MUTED)),
                     SeatState::Accessible => ("◇  ", Style::default().fg(Color::Cyan)),
                 }
             };
@@ -476,19 +638,20 @@ fn render_seat_map(frame: &mut Frame<'_>, area: Rect, app: &App) {
         Span::raw(" recomendado   "),
         Span::styled("□ ", Style::default().fg(Color::Blue)),
         Span::raw("disponible   "),
-        Span::styled("■ ", Style::default().fg(Color::DarkGray)),
-        Span::raw("ocupado"),
+        Span::styled("■ ", Style::default().fg(MUTED)),
+        Span::raw("ocupado   "),
+        Span::styled("◇ ", Style::default().fg(Color::Cyan)),
+        Span::raw("accesibilidad"),
     ]));
 
     frame.render_widget(
         Paragraph::new(lines)
             .alignment(Alignment::Center)
             .wrap(Wrap { trim: false })
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(" Mapa de sala "),
-            ),
+            .block(Block::default().borders(Borders::ALL).title(format!(
+                " Mapa real de Cineplanet · {} disponibles ",
+                app.available_seat_count(showtime)
+            ))),
         area,
     );
 }
@@ -498,16 +661,25 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App) {
         Screen::Welcome => "Enter comenzar · Q / Ctrl-C salir",
         Screen::CitySetup => "↑↓ mover · Enter elegir ciudad · Q salir",
         Screen::VenueSetup => "↑↓ mover · Espacio marcar · Enter guardar · Q salir",
-        Screen::Movies => "Escribe para filtrar · ↑↓ mover · Enter analizar · P sedes · Q salir",
+        Screen::Movies => {
+            "Escribe para filtrar · ↑↓ mover · Enter elegir película · Esc sedes · Q salir"
+        }
+        Screen::DateFilter => {
+            "↑↓ mover · Espacio/Enter marcar · baja a Continuar · Esc volver · Q salir"
+        }
+        Screen::VenueFilter => {
+            "↑↓ mover · Espacio/Enter marcar · baja a Continuar · Esc volver · Q salir"
+        }
+        Screen::PartySize => "↑↓ mover · Enter elegir · baja a Continuar · Esc volver · Q salir",
+        Screen::SearchSummary => "Enter buscar funciones · Esc volver · Q salir",
         Screen::Loading => "Actualizando disponibilidad real…",
-        Screen::Results => "↑↓ mover · Enter ver sala · F filtros · Esc volver · P sedes · Q salir",
-        Screen::Filters => "↑↓ mover · Espacio marcar · Enter aplicar · Esc volver · Q salir",
+        Screen::Results => "↑↓ mover · Enter ver o modificar · Esc volver · Q salir",
         Screen::SeatMap => "Esc volver · Q salir",
     };
     frame.render_widget(
         Paragraph::new(help)
             .alignment(Alignment::Center)
-            .style(Style::default().fg(Color::DarkGray)),
+            .style(Style::default().fg(MUTED)),
         area,
     );
 }

@@ -235,36 +235,73 @@ fn room_type(formats: &[String], screen_name: &str) -> String {
 
 fn seat_map_from(layout: SeatLayout) -> Result<SeatMap> {
     let mut seats = Vec::new();
-    let mut row_index = 0_u16;
+    let mut rows = 0_u16;
     let mut columns = 0_u16;
-    for area in layout.areas {
+    let mut y_offset = 0_u16;
+
+    // Cineplanet entrega coordenadas dentro de cada área. Las áreas múltiples
+    // se apilan respetando el orden vertical oficial y dejando un pasillo entre
+    // ellas; la gran mayoría de salas públicas usa una sola área.
+    let mut areas = layout.areas;
+    areas.sort_by_key(|area| (area.top, area.left, area.number));
+
+    for area in areas {
+        let area_rows =
+            u16::try_from(area.row_count.max(0)).context("cantidad de filas del área inválida")?;
+        let area_columns = u16::try_from(area.column_count.max(0))
+            .context("cantidad de columnas del área inválida")?;
+        let inferred_rows = area
+            .rows
+            .iter()
+            .flat_map(|row| row.seats.iter())
+            .filter_map(|seat| u16::try_from(seat.position.row_index).ok())
+            .max()
+            .map_or(0, |row| row.saturating_add(1));
+        let inferred_columns = area
+            .rows
+            .iter()
+            .flat_map(|row| row.seats.iter())
+            .filter_map(|seat| u16::try_from(seat.position.column_index).ok())
+            .max()
+            .map_or(0, |column| column.saturating_add(1));
+        let area_rows = area_rows.max(inferred_rows);
+        let area_columns = area_columns.max(inferred_columns);
+
         for row in area.rows {
-            let name = row.physical_name;
+            let Some(name) = row.physical_name else {
+                continue;
+            };
             for seat in row.seats {
                 let x = u16::try_from(seat.position.column_index)
                     .context("columna de asiento inválida")?;
-                columns = columns.max(x.saturating_add(1));
+                let source_y =
+                    u16::try_from(seat.position.row_index).context("fila de asiento inválida")?;
+                let y =
+                    y_offset.saturating_add(area_rows.saturating_sub(1).saturating_sub(source_y));
                 seats.push(Seat {
                     id: format!("{name}{}", seat.id),
                     row: name.clone(),
-                    number: x.saturating_add(1),
+                    number: seat.id.parse().unwrap_or_else(|_| x.saturating_add(1)),
                     x,
-                    y: row_index,
-                    state: if seat.status == 0 {
-                        SeatState::Available
-                    } else {
-                        SeatState::Occupied
+                    y,
+                    state: match seat.status {
+                        0 => SeatState::Available,
+                        3 => SeatState::Accessible,
+                        _ => SeatState::Occupied,
                     },
                 });
             }
-            row_index = row_index.saturating_add(1);
         }
+
+        rows = rows.max(y_offset.saturating_add(area_rows));
+        columns = columns.max(area_columns);
+        y_offset = rows.saturating_add(1);
     }
     if seats.is_empty() {
         bail!("el mapa de Cineplanet no tiene asientos")
     }
     Ok(SeatMap {
-        rows: row_index,
+        rows,
         columns,
         seats,
     })
@@ -342,12 +379,22 @@ struct SeatLayout {
 #[derive(Deserialize)]
 #[serde(rename_all = "PascalCase")]
 struct SeatArea {
+    #[serde(default)]
+    number: i32,
+    #[serde(default)]
+    left: i32,
+    #[serde(default)]
+    top: i32,
+    #[serde(default)]
+    column_count: i32,
+    #[serde(default)]
+    row_count: i32,
     rows: Vec<SeatRow>,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "PascalCase")]
 struct SeatRow {
-    physical_name: String,
+    physical_name: Option<String>,
     seats: Vec<ApiSeat>,
 }
 #[derive(Deserialize)]
@@ -360,6 +407,8 @@ struct ApiSeat {
 #[derive(Deserialize)]
 #[serde(rename_all = "PascalCase")]
 struct SeatPosition {
+    #[serde(default)]
+    row_index: i32,
     column_index: i32,
 }
 
@@ -390,12 +439,37 @@ mod tests {
 
     #[test]
     fn parses_a_realistic_seat_layout_without_exposing_remote_data() {
-        let response: SeatPlanResponse = serde_json::from_str(r#"{"ResponseCode":"0","ErrorDescription":null,"SeatLayoutData":{"Areas":[{"Rows":[{"PhysicalName":"G","Seats":[{"Id":"7","Status":0,"Position":{"ColumnIndex":6}},{"Id":"8","Status":1,"Position":{"ColumnIndex":7}}]}]}]}}"#).unwrap();
+        let response: SeatPlanResponse = serde_json::from_str(r#"{"ResponseCode":"0","ErrorDescription":null,"SeatLayoutData":{"Areas":[{"Number":1,"Left":42,"Top":90,"ColumnCount":10,"RowCount":3,"Rows":[{"PhysicalName":"G","Seats":[{"Id":"7","Status":0,"Position":{"AreaNumber":1,"RowIndex":0,"ColumnIndex":6}},{"Id":"8","Status":1,"Position":{"AreaNumber":1,"RowIndex":0,"ColumnIndex":7}}]}]}]}}"#).unwrap();
         let map = seat_map_from(response.seat_layout_data.unwrap()).unwrap();
-        assert_eq!(map.rows, 1);
-        assert_eq!(map.columns, 8);
+        assert_eq!(map.rows, 3);
+        assert_eq!(map.columns, 10);
+        assert_eq!(map.seats[0].y, 2);
         assert_eq!(map.seats[0].state, SeatState::Available);
         assert_eq!(map.seats[1].state, SeatState::Occupied);
+    }
+
+    #[test]
+    fn ignores_non_sellable_rows_without_a_physical_name() {
+        let response: SeatPlanResponse = serde_json::from_str(r#"{"ResponseCode":"0","ErrorDescription":null,"SeatLayoutData":{"Areas":[{"RowCount":2,"Rows":[{"PhysicalName":null,"Seats":[]},{"PhysicalName":"G","Seats":[{"Id":"7","Status":0,"Position":{"RowIndex":0,"ColumnIndex":6}}]}]}]}}"#).unwrap();
+        let map = seat_map_from(response.seat_layout_data.unwrap()).unwrap();
+
+        assert_eq!(map.rows, 2);
+        assert_eq!(map.seats.len(), 1);
+        assert_eq!(map.seats[0].row, "G");
+    }
+
+    #[test]
+    fn preserves_official_gaps_orientation_and_accessible_places() {
+        let response: SeatPlanResponse = serde_json::from_str(r#"{"ResponseCode":"0","ErrorDescription":null,"SeatLayoutData":{"Areas":[{"Number":1,"Left":42,"Top":90,"ColumnCount":9,"RowCount":5,"Rows":[{"PhysicalName":"C","Seats":[{"Id":"1","Status":0,"Position":{"AreaNumber":1,"RowIndex":0,"ColumnIndex":0}},{"Id":"2","Status":0,"Position":{"AreaNumber":1,"RowIndex":0,"ColumnIndex":1}},{"Id":"3","Status":1,"Position":{"AreaNumber":1,"RowIndex":0,"ColumnIndex":5}}]},{"PhysicalName":"B","Seats":[{"Id":"1","Status":3,"Position":{"AreaNumber":1,"RowIndex":3,"ColumnIndex":4}}]}]}]}}"#).unwrap();
+
+        let map = seat_map_from(response.seat_layout_data.unwrap()).unwrap();
+
+        assert_eq!((map.rows, map.columns), (5, 9));
+        assert_eq!((map.seats[0].x, map.seats[0].y), (0, 4));
+        assert_eq!((map.seats[2].x, map.seats[2].y), (5, 4));
+        assert!(!map.seats.iter().any(|seat| seat.x == 2 && seat.y == 4));
+        assert_eq!((map.seats[3].x, map.seats[3].y), (4, 1));
+        assert_eq!(map.seats[3].state, SeatState::Accessible);
     }
 
     #[test]
@@ -449,5 +523,18 @@ mod tests {
         assert!(!catalog.movies.is_empty());
         assert!(!catalog.venues.is_empty());
         assert!(!catalog.showtimes.is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "consulta un mapa de asientos público actual de Cineplanet"]
+    async fn public_seat_plan_contract_still_parses() {
+        let (client, catalog) = load_catalog().await.unwrap();
+        let showtime = catalog.showtimes.into_iter().next().unwrap();
+        let hydrated = client
+            .hydrate_showtime(showtime)
+            .await
+            .expect("Cineplanet no entregó un mapa utilizable");
+
+        assert!(!hydrated.seat_map.seats.is_empty());
     }
 }
