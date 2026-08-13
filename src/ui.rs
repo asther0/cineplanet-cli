@@ -10,7 +10,7 @@ use ratatui::{
 
 use crate::{
     app::{App, Screen},
-    domain::{Quality, SeatState},
+    domain::{Quality, SeatState, SeatingArrangement},
 };
 
 const BLUE: Color = Color::Rgb(16, 70, 135);
@@ -408,17 +408,20 @@ fn result_status_tags(app: &App, showtime: &crate::domain::Showtime) -> Vec<Span
             Style::default().fg(ALERT).add_modifier(bold),
         )];
     };
-    if analysis.block.len() != party_size {
+    if analysis.arrangement == SeatingArrangement::Scattered || analysis.block.len() != party_size {
         return vec![Span::styled(
             format!("[SIN {party_size} JUNTOS]"),
             Style::default().fg(ALERT).add_modifier(bold),
         )];
     }
 
-    let group_tag = if party_size == 1 {
-        "[ASIENTO DISPONIBLE]".to_string()
-    } else {
-        format!("[{party_size} JUNTOS]")
+    let group_tag = match analysis.arrangement {
+        SeatingArrangement::Together if party_size == 1 => "[ASIENTO DISPONIBLE]".to_string(),
+        SeatingArrangement::Together => format!("[{party_size} JUNTOS]"),
+        SeatingArrangement::AcrossAisle { first, second } => {
+            format!("[{}+{} AL PASILLO]", first.max(second), first.min(second))
+        }
+        SeatingArrangement::Scattered => unreachable!(),
     };
     let (zone_tag, zone_style) = match analysis.quality {
         Quality::Excellent => (
@@ -930,6 +933,40 @@ mod tests {
     }
 
     #[test]
+    fn results_render_an_across_aisle_group_tag_and_highlight_every_recommended_seat() {
+        let mut catalog = demo::catalog();
+        catalog
+            .showtimes
+            .retain(|showtime| showtime.movie_id == "spider-man");
+        catalog.showtimes.truncate(1);
+        catalog.showtimes[0].seat_map = aisle_seat_map();
+        let mut app = app_with_results_from_catalog(
+            catalog,
+            Preferences {
+                onboarding_complete: true,
+                city: Some("Lima".into()),
+                party_size: 5,
+                ..Preferences::default()
+            },
+        );
+
+        assert!(
+            rendered_lines(&app)
+                .iter()
+                .any(|line| line.contains("[4+1 AL PASILLO]"))
+        );
+
+        app.apply(Action::Down).unwrap();
+        app.apply(Action::Confirm).unwrap();
+        let highlighted = rendered_lines(&app)
+            .iter()
+            .filter(|line| !line.contains("recomendado"))
+            .map(|line| line.matches("██").count())
+            .sum::<usize>();
+        assert_eq!(highlighted, 5);
+    }
+
+    #[test]
     fn results_normalize_a_persisted_zero_person_party_before_rendering() {
         let app = app_with_results_from_catalog(
             demo::catalog(),
@@ -1042,6 +1079,24 @@ mod tests {
             rows: 10,
             columns: 10,
             seats,
+        }
+    }
+
+    fn aisle_seat_map() -> SeatMap {
+        SeatMap {
+            rows: 10,
+            columns: 10,
+            seats: [(0, 1), (1, 2), (2, 3), (3, 4), (5, 5)]
+                .into_iter()
+                .map(|(x, number)| Seat {
+                    id: format!("G{number}"),
+                    row: "G".into(),
+                    number,
+                    x,
+                    y: 6,
+                    state: SeatState::Available,
+                })
+                .collect(),
         }
     }
 }

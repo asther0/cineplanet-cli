@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 
-use crate::domain::{Preferences, Quality, Recommendation, Seat, SeatState, Showtime};
+use crate::domain::{
+    Preferences, Quality, Recommendation, Seat, SeatState, SeatingArrangement, Showtime,
+};
 
 pub fn recommend(
     showtimes: &[Showtime],
@@ -29,13 +31,28 @@ pub fn recommend(
         })
         .filter_map(|showtime| best_recommendation(showtime, preferences))
         .collect();
+    let has_apt_across_aisle = recommendations.iter().any(|recommendation| {
+        recommendation.quality != Quality::Unfavorable
+            && matches!(
+                recommendation.arrangement,
+                SeatingArrangement::AcrossAisle { .. }
+            )
+    });
     if recommendations
         .iter()
         .any(|recommendation| recommendation.quality != Quality::Unfavorable)
     {
-        recommendations.retain(|recommendation| recommendation.quality != Quality::Unfavorable);
+        recommendations.retain(|recommendation| {
+            recommendation.quality != Quality::Unfavorable
+                || (has_apt_across_aisle
+                    && recommendation.arrangement == SeatingArrangement::Together)
+        });
     }
-    recommendations.sort_by(|left, right| right.score.total_cmp(&left.score));
+    recommendations.sort_by(|left, right| {
+        arrangement_priority(&left.arrangement)
+            .cmp(&arrangement_priority(&right.arrangement))
+            .then_with(|| right.score.total_cmp(&left.score))
+    });
     recommendations.truncate(limit);
     recommendations
 }
@@ -90,7 +107,17 @@ fn best_recommendation(showtime: &Showtime, preferences: &Preferences) -> Option
         }
     }
 
-    let Some((seat_score, block)) = best else {
+    let (seat_score, block, arrangement) = if let Some((seat_score, block)) = best {
+        (seat_score, block, SeatingArrangement::Together)
+    } else if let Some((seat_score, block, first, second)) =
+        best_across_aisle(showtime, preferences)
+    {
+        (
+            seat_score,
+            block,
+            SeatingArrangement::AcrossAisle { first, second },
+        )
+    } else {
         return fallback_recommendation(showtime, preferences);
     };
     let quality = if seat_score >= 90.0 {
@@ -102,7 +129,13 @@ fn best_recommendation(showtime: &Showtime, preferences: &Preferences) -> Option
     };
 
     let is_favorite = preferences.favorite_venue_ids.contains(&showtime.venue_id);
-    let mut reasons = vec!["Bloque contiguo cerca del centro de la sala".into()];
+    let mut reasons = vec![match arrangement {
+        SeatingArrangement::Together => "Bloque contiguo cerca del centro de la sala".into(),
+        SeatingArrangement::AcrossAisle { .. } => {
+            "Dos bloques contiguos separados por un pasillo".into()
+        }
+        SeatingArrangement::Scattered => unreachable!(),
+    }];
     let score = if is_favorite {
         reasons.push("Sede favorita".into());
         seat_score + 8.0
@@ -113,10 +146,107 @@ fn best_recommendation(showtime: &Showtime, preferences: &Preferences) -> Option
     Some(Recommendation {
         showtime: showtime.clone(),
         block,
+        arrangement,
         quality,
         reasons,
         score,
     })
+}
+
+fn arrangement_priority(arrangement: &SeatingArrangement) -> u8 {
+    match arrangement {
+        SeatingArrangement::Together => 0,
+        SeatingArrangement::AcrossAisle { .. } => 1,
+        SeatingArrangement::Scattered => 2,
+    }
+}
+
+fn best_across_aisle(
+    showtime: &Showtime,
+    preferences: &Preferences,
+) -> Option<(f64, Vec<Seat>, usize, usize)> {
+    let mut rows: BTreeMap<&str, Vec<&Seat>> = BTreeMap::new();
+    for seat in &showtime.seat_map.seats {
+        rows.entry(&seat.row).or_default().push(seat);
+    }
+
+    let mut best: Option<(usize, f64, Vec<Seat>, usize, usize)> = None;
+    for seats in rows.values_mut() {
+        seats.sort_by_key(|seat| seat.x);
+        for pair in seats.windows(2).filter(|pair| pair[1].x > pair[0].x + 1) {
+            let (left, right) = (pair[0], pair[1]);
+            let left_run = available_run_ending_at(seats, left.x);
+            let right_run = available_run_starting_at(seats, right.x);
+            for left_size in 1..=left_run.len().min(preferences.party_size.saturating_sub(1)) {
+                let right_size = preferences.party_size - left_size;
+                if right_size == 0 || right_size > right_run.len() {
+                    continue;
+                }
+                let mut block: Vec<Seat> = left_run[left_run.len() - left_size..]
+                    .iter()
+                    .chain(right_run[..right_size].iter())
+                    .map(|seat| (*seat).clone())
+                    .collect();
+                block.sort_by_key(|seat| seat.number);
+                let Some(score) = visual_score(showtime, &block) else {
+                    continue;
+                };
+                let smaller = left_size.min(right_size);
+                if best.as_ref().is_none_or(|(best_smaller, best_score, ..)| {
+                    smaller < *best_smaller || (smaller == *best_smaller && score > *best_score)
+                }) {
+                    best = Some((smaller, score, block, left_size, right_size));
+                }
+            }
+        }
+    }
+    best.map(|(_, score, block, first, second)| (score, block, first, second))
+}
+
+fn available_run_ending_at<'a>(seats: &[&'a Seat], x: u16) -> Vec<&'a Seat> {
+    let Some(end) = seats.iter().position(|seat| seat.x == x) else {
+        return Vec::new();
+    };
+    let mut start = end;
+    while start > 0 && contiguous_available(seats[start - 1], seats[start]) {
+        start -= 1;
+    }
+    if seats[end].state == SeatState::Available {
+        seats[start..=end].to_vec()
+    } else {
+        Vec::new()
+    }
+}
+
+fn available_run_starting_at<'a>(seats: &[&'a Seat], x: u16) -> Vec<&'a Seat> {
+    let Some(start) = seats.iter().position(|seat| seat.x == x) else {
+        return Vec::new();
+    };
+    let mut end = start;
+    while end + 1 < seats.len() && contiguous_available(seats[end], seats[end + 1]) {
+        end += 1;
+    }
+    if seats[start].state == SeatState::Available {
+        seats[start..=end].to_vec()
+    } else {
+        Vec::new()
+    }
+}
+
+fn contiguous_available(left: &Seat, right: &Seat) -> bool {
+    left.state == SeatState::Available
+        && right.state == SeatState::Available
+        && right.x == left.x + 1
+        && left.number.abs_diff(right.number) == 1
+}
+
+fn visual_score(showtime: &Showtime, block: &[Seat]) -> Option<f64> {
+    let center_x = block.iter().map(|seat| f64::from(seat.x)).sum::<f64>() / block.len() as f64;
+    let center_y = block.iter().map(|seat| f64::from(seat.y)).sum::<f64>() / block.len() as f64;
+    let normalized_x = center_x / f64::from(showtime.seat_map.columns.saturating_sub(1).max(1));
+    let normalized_y = center_y / f64::from(showtime.seat_map.rows.saturating_sub(1).max(1));
+    (normalized_y >= 0.20)
+        .then(|| 100.0 - (normalized_x - 0.5).abs() * 70.0 - (normalized_y - 0.66).abs() * 45.0)
 }
 
 fn fallback_recommendation(
@@ -144,6 +274,7 @@ fn fallback_recommendation(
     Some(Recommendation {
         showtime: showtime.clone(),
         block: vec![representative],
+        arrangement: SeatingArrangement::Scattered,
         quality: Quality::Unfavorable,
         reasons,
         score,
@@ -154,7 +285,9 @@ fn fallback_recommendation(
 mod tests {
     use chrono::DateTime;
 
-    use crate::domain::{Modality, Preferences, Seat, SeatMap, SeatState, Showtime};
+    use crate::domain::{
+        Modality, Preferences, Seat, SeatMap, SeatState, SeatingArrangement, Showtime,
+    };
 
     use super::{analyze_showtime, recommend};
 
@@ -225,6 +358,371 @@ mod tests {
             .map(|seat| seat.id.as_str())
             .collect();
         assert_eq!(ids, ["G5", "G6"]);
+    }
+
+    #[test]
+    fn recommends_four_plus_one_across_a_physical_aisle() {
+        let showtime = showtime_with_row_layout(
+            "aisle",
+            6,
+            &[
+                (0, 1, true),
+                (1, 2, true),
+                (2, 3, true),
+                (3, 4, true),
+                (5, 5, true),
+            ],
+        );
+        let preferences = Preferences {
+            party_size: 5,
+            ..Preferences::default()
+        };
+
+        let recommendation = analyze_showtime(&showtime, &preferences).unwrap();
+
+        assert_eq!(
+            recommendation.arrangement,
+            SeatingArrangement::AcrossAisle {
+                first: 4,
+                second: 1
+            }
+        );
+        assert_eq!(recommendation.block.len(), 5);
+    }
+
+    #[test]
+    fn prefers_four_plus_one_over_three_plus_two_across_the_same_aisle() {
+        let showtime = showtime_with_row_layout(
+            "aisle",
+            6,
+            &[
+                (0, 1, true),
+                (1, 2, true),
+                (2, 3, true),
+                (3, 4, true),
+                (5, 5, true),
+                (6, 6, true),
+            ],
+        );
+        let preferences = Preferences {
+            party_size: 5,
+            ..Preferences::default()
+        };
+
+        assert_eq!(
+            analyze_showtime(&showtime, &preferences)
+                .unwrap()
+                .arrangement,
+            SeatingArrangement::AcrossAisle {
+                first: 4,
+                second: 1
+            }
+        );
+    }
+
+    #[test]
+    fn does_not_treat_an_occupied_seat_as_an_aisle() {
+        let showtime = showtime_with_row_layout(
+            "occupied",
+            6,
+            &[
+                (0, 1, true),
+                (1, 2, true),
+                (2, 3, true),
+                (3, 4, true),
+                (4, 5, false),
+                (5, 6, true),
+            ],
+        );
+        let preferences = Preferences {
+            party_size: 5,
+            ..Preferences::default()
+        };
+
+        assert_eq!(
+            analyze_showtime(&showtime, &preferences)
+                .unwrap()
+                .arrangement,
+            SeatingArrangement::Scattered
+        );
+    }
+
+    #[test]
+    fn requires_both_aisle_blocks_to_be_in_the_same_row() {
+        let mut showtime = showtime_with_row_layout(
+            "rows",
+            6,
+            &[(0, 1, true), (1, 2, true), (2, 3, true), (3, 4, true)],
+        );
+        showtime
+            .seat_map
+            .seats
+            .extend(
+                [(5, 5, true)]
+                    .into_iter()
+                    .map(|(x, number, available)| Seat {
+                        id: format!("H{number}"),
+                        row: "H".into(),
+                        number,
+                        x,
+                        y: 7,
+                        state: if available {
+                            SeatState::Available
+                        } else {
+                            SeatState::Occupied
+                        },
+                    }),
+            );
+        let preferences = Preferences {
+            party_size: 5,
+            ..Preferences::default()
+        };
+
+        assert_eq!(
+            analyze_showtime(&showtime, &preferences)
+                .unwrap()
+                .arrangement,
+            SeatingArrangement::Scattered
+        );
+    }
+
+    #[test]
+    fn recommends_across_an_aisle_with_mirrored_x_coordinates() {
+        let showtime = showtime_with_row_layout(
+            "mirrored-aisle",
+            6,
+            &[
+                (9, 1, true),
+                (8, 2, true),
+                (7, 3, true),
+                (6, 4, true),
+                (4, 5, true),
+            ],
+        );
+        let preferences = Preferences {
+            party_size: 5,
+            ..Preferences::default()
+        };
+
+        assert!(matches!(
+            analyze_showtime(&showtime, &preferences)
+                .unwrap()
+                .arrangement,
+            SeatingArrangement::AcrossAisle {
+                first: 4,
+                second: 1
+            } | SeatingArrangement::AcrossAisle {
+                first: 1,
+                second: 4
+            }
+        ));
+    }
+
+    #[test]
+    fn prefers_a_fully_contiguous_block_over_an_across_aisle_option() {
+        let showtime = showtime_with_row_layout(
+            "together",
+            6,
+            &[
+                (0, 1, true),
+                (1, 2, true),
+                (2, 3, true),
+                (3, 4, true),
+                (5, 5, true),
+                (6, 6, true),
+                (7, 7, true),
+                (8, 8, true),
+                (9, 9, true),
+            ],
+        );
+        let preferences = Preferences {
+            party_size: 5,
+            ..Preferences::default()
+        };
+
+        assert_eq!(
+            analyze_showtime(&showtime, &preferences)
+                .unwrap()
+                .arrangement,
+            SeatingArrangement::Together
+        );
+    }
+
+    #[test]
+    fn ranks_a_contiguous_block_before_a_better_positioned_aisle_option() {
+        let together = showtime_with_row_layout(
+            "together",
+            2,
+            &[
+                (0, 1, true),
+                (1, 2, true),
+                (2, 3, true),
+                (3, 4, true),
+                (4, 5, true),
+            ],
+        );
+        let aisle = showtime_with_row_layout(
+            "aisle",
+            6,
+            &[
+                (3, 1, true),
+                (4, 2, true),
+                (5, 3, true),
+                (6, 4, true),
+                (8, 5, true),
+            ],
+        );
+        let preferences = Preferences {
+            party_size: 5,
+            ..Preferences::default()
+        };
+
+        let recommendations = recommend(&[aisle, together], &preferences, 3);
+
+        assert_eq!(recommendations[0].showtime.id, "together");
+        assert_eq!(recommendations[0].arrangement, SeatingArrangement::Together);
+    }
+
+    #[test]
+    fn continues_past_an_oversized_front_row_run_to_find_a_valid_aisle_row() {
+        let mut showtime = showtime_with_row_layout(
+            "later-aisle",
+            0,
+            &[
+                (0, 1, true),
+                (1, 2, true),
+                (2, 3, true),
+                (3, 4, true),
+                (4, 5, true),
+                (5, 6, true),
+                (7, 7, true),
+            ],
+        );
+        for seat in &mut showtime.seat_map.seats {
+            seat.row = "A".into();
+        }
+        showtime.seat_map.seats.extend(row_seats(
+            "G",
+            6,
+            &[
+                (0, 1, true),
+                (1, 2, true),
+                (2, 3, true),
+                (3, 4, true),
+                (5, 5, true),
+            ],
+        ));
+        let preferences = Preferences {
+            party_size: 5,
+            ..Preferences::default()
+        };
+
+        assert!(matches!(
+            analyze_showtime(&showtime, &preferences)
+                .unwrap()
+                .arrangement,
+            SeatingArrangement::AcrossAisle { .. }
+        ));
+    }
+
+    #[test]
+    fn continues_to_a_later_physical_aisle_when_the_first_cannot_fit_the_group() {
+        let showtime = showtime_with_row_layout(
+            "second-aisle",
+            6,
+            &[
+                (0, 1, true),
+                (1, 2, true),
+                (3, 3, true),
+                (4, 4, true),
+                (6, 5, true),
+                (7, 6, true),
+                (8, 7, true),
+            ],
+        );
+        let preferences = Preferences {
+            party_size: 5,
+            ..Preferences::default()
+        };
+
+        assert_eq!(
+            analyze_showtime(&showtime, &preferences)
+                .unwrap()
+                .arrangement,
+            SeatingArrangement::AcrossAisle {
+                first: 2,
+                second: 3,
+            }
+        );
+    }
+
+    #[test]
+    fn ranks_an_unfavorable_across_aisle_option_before_scattered_seats() {
+        let across_aisle = showtime_with_row_layout(
+            "across-aisle",
+            9,
+            &[
+                (0, 1, true),
+                (1, 2, true),
+                (2, 3, true),
+                (3, 4, true),
+                (5, 5, true),
+            ],
+        );
+        let scattered =
+            showtime_with_row_layout("scattered", 6, &[(0, 1, true), (2, 2, true), (4, 3, true)]);
+        let preferences = Preferences {
+            party_size: 5,
+            ..Preferences::default()
+        };
+
+        let recommendations = recommend(&[scattered, across_aisle], &preferences, 3);
+
+        assert_eq!(recommendations[0].showtime.id, "across-aisle");
+        assert!(matches!(
+            recommendations[0].arrangement,
+            SeatingArrangement::AcrossAisle { .. }
+        ));
+    }
+
+    #[test]
+    fn keeps_an_unfavorable_together_option_when_an_across_aisle_option_is_apt() {
+        let together = showtime_with_row_layout(
+            "together",
+            9,
+            &[
+                (0, 1, true),
+                (1, 2, true),
+                (2, 3, true),
+                (3, 4, true),
+                (4, 5, true),
+            ],
+        );
+        let across_aisle = showtime_with_row_layout(
+            "across-aisle",
+            6,
+            &[
+                (3, 1, true),
+                (4, 2, true),
+                (5, 3, true),
+                (6, 4, true),
+                (8, 5, true),
+            ],
+        );
+        let preferences = Preferences {
+            party_size: 5,
+            ..Preferences::default()
+        };
+
+        let recommendations = recommend(&[across_aisle, together], &preferences, 3);
+
+        assert_eq!(
+            recommendations
+                .iter()
+                .map(|recommendation| recommendation.showtime.id.as_str())
+                .collect::<Vec<_>>(),
+            ["together", "across-aisle"]
+        );
     }
 
     #[test]
@@ -417,5 +915,58 @@ mod tests {
                 seats,
             },
         }
+    }
+
+    fn showtime_with_row_layout(id: &str, y: u16, seats: &[(u16, u16, bool)]) -> Showtime {
+        Showtime {
+            id: id.into(),
+            movie_id: "movie-1".into(),
+            movie_title: "Spider-Man".into(),
+            venue_id: "la-molina".into(),
+            venue_name: "CP La Molina".into(),
+            starts_at: DateTime::parse_from_rfc3339("2026-08-10T20:30:00-05:00").unwrap(),
+            modality: Modality {
+                projection_format: "2D".into(),
+                language: "Subtitulada".into(),
+                room_type: "Regular".into(),
+            },
+            seat_map: SeatMap {
+                rows: 10,
+                columns: 10,
+                seats: seats
+                    .iter()
+                    .map(|(x, number, available)| Seat {
+                        id: format!("G{number}"),
+                        row: "G".into(),
+                        number: *number,
+                        x: *x,
+                        y,
+                        state: if *available {
+                            SeatState::Available
+                        } else {
+                            SeatState::Occupied
+                        },
+                    })
+                    .collect(),
+            },
+        }
+    }
+
+    fn row_seats(row: &str, y: u16, seats: &[(u16, u16, bool)]) -> Vec<Seat> {
+        seats
+            .iter()
+            .map(|(x, number, available)| Seat {
+                id: format!("{row}{number}"),
+                row: row.into(),
+                number: *number,
+                x: *x,
+                y,
+                state: if *available {
+                    SeatState::Available
+                } else {
+                    SeatState::Occupied
+                },
+            })
+            .collect()
     }
 }

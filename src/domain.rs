@@ -95,10 +95,23 @@ pub enum Quality {
     Unfavorable,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SeatingArrangement {
+    Together,
+    AcrossAisle {
+        first: usize,
+        second: usize,
+    },
+    #[default]
+    Scattered,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Recommendation {
     pub showtime: Showtime,
     pub block: Vec<Seat>,
+    #[serde(default)]
+    pub arrangement: SeatingArrangement,
     pub quality: Quality,
     pub reasons: Vec<String>,
     #[serde(skip)]
@@ -110,4 +123,52 @@ pub struct Catalog {
     pub movies: Vec<Movie>,
     pub venues: Vec<Venue>,
     pub showtimes: Vec<Showtime>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Recommendation, SeatingArrangement};
+
+    #[test]
+    fn serializes_each_seating_arrangement() {
+        let arrangement = SeatingArrangement::AcrossAisle {
+            first: 4,
+            second: 1,
+        };
+
+        assert_eq!(
+            serde_json::from_str::<SeatingArrangement>(
+                &serde_json::to_string(&arrangement).unwrap()
+            )
+            .unwrap(),
+            arrangement
+        );
+    }
+
+    #[test]
+    fn deserializes_a_legacy_recommendation_without_an_arrangement() {
+        let legacy = serde_json::json!({
+            "showtime": {
+                "id": "showtime-1",
+                "movie_id": "movie-1",
+                "movie_title": "Spider-Man",
+                "venue_id": "la-molina",
+                "venue_name": "CP La Molina",
+                "starts_at": "2026-08-10T20:30:00-05:00",
+                "modality": {
+                    "projection_format": "2D",
+                    "language": "Subtitulada",
+                    "room_type": "Regular"
+                },
+                "seat_map": { "rows": 10, "columns": 10, "seats": [] }
+            },
+            "block": [],
+            "quality": "Unfavorable",
+            "reasons": []
+        });
+
+        let recommendation: Recommendation = serde_json::from_value(legacy).unwrap();
+
+        assert_eq!(recommendation.arrangement, SeatingArrangement::Scattered);
+    }
 }
