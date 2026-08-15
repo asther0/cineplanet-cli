@@ -40,6 +40,37 @@ Ciudad → película → fecha(s) → sede(s) → grupo (1-5) → funciones → 
 
 La TUI permite escribir para filtrar ciudades, películas, fechas, sedes y funciones al instante. También funciona con flechas, Enter, Escape y selectores múltiples; no requiere memorizar comandos.
 
+## TUI y recomendaciones para agentes
+
+`cineplanet-cli` inicia la TUI por defecto. Para una consulta automatizada o desde Codex, usa el comando no interactivo `recommend`: escribe un único documento JSON versionado en stdout (o un error JSON versionado en stderr), sin abrir la TUI.
+
+```bash
+cineplanet-cli recommend \
+  --movie-title "La Odisea" --city "Lima" --party-size 2 \
+  --date 2026-08-15 --venue "CP La Molina" \
+  --language Subtitulada --format 2D --room-type Regular \
+  --favorite-venue la-molina --limit 3
+```
+
+El selector de película es exactamente uno de `--movie-id` o `--movie-title`; ciudad y grupo (`1` a `5`) son obligatorios. Repite `--date`, `--venue`, `--language`, `--format`, `--room-type` y `--favorite-venue` para varios valores. Las fechas usan `YYYY-MM-DD` en America/Lima. La respuesta `v1` contiene `observed_at` (RFC 3339 en UTC, momento en que la CLI observó la disponibilidad), `query`, recomendaciones ordenadas con `venue`, `starts_at`, `modality`, `viewing` (score, calidad, zona y razones), `selected_block`, y `diagnostics` (`candidate_count`, `hydrated_count`, `map_failures`). `observed_at` no aparece en sobres de error.
+
+```json
+{
+  "version": "v1",
+  "observed_at": "2026-08-15T12:34:56.789012+00:00",
+  "recommendations": [{
+    "rank": 1,
+    "viewing": { "score": 99.7, "zone": { "id": "central_middle_rear" } },
+    "selected_block": { "seats": [{ "row": "G", "number": 6 }, { "row": "G", "number": 7 }] }
+  }],
+  "diagnostics": { "map_failures": [] }
+}
+```
+
+En Codex, el skill repo-scoped `$cineplanet-recommend` se descubre desde `.agents/skills/cineplanet-recommend`; también se activa de forma natural con peticiones como “¿dónde veo La Odisea temprano en Lima para 3?”, “busca 2D subtitulada en San Miguel” o “encuéntrame cuatro asientos juntos”. El agente usa `recommend`, no la TUI, conserva el orden y la evaluación devueltos, y comunica que los asientos son observados y pueden cambiar.
+
+El comando filtra película, ciudad, fecha, sede y modalidad antes de hidratar mapas de sala; filtrar más reduce las consultas posteriores. Si Cineplanet cambia su contrato público, falla explícitamente y no inventa datos. Una falla parcial de mapas aparece en `diagnostics.map_failures`; si no se hidrata ningún candidato con fallas, devuelve un error JSON. No inicia sesión ni reserva, retiene o compra entradas.
+
 ## Roadmap
 
 1. Modos de decisión: Mejor vista, Más pronto y Todos juntos.
