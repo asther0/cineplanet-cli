@@ -54,15 +54,15 @@ valen la pena, no solo cuántos quedan.
 Este proyecto también dio lugar a una interfaz web y una API reutilizable para
 consultar Cineplanet sin instalar el CLI:
 
-| Proyecto | Qué aporta |
-| --- | --- |
-| [cineplanet-api](https://github.com/gersonsebastianx/cineplanet-api) | Documentación verificada por ingeniería inversa de los endpoints públicos de Cineplanet y un cliente Node.js sin dependencias para cartelera, funciones y mapas de butacas. |
-| [cineplanet-api.vercel.app](https://cineplanet-api.vercel.app) | Interfaz web conversacional para escribir una búsqueda, ver la función con su mapa y continuar hacia el enlace oficial de compra. |
+| Proyecto | Repositorio | Demo |
+| --- | --- | --- |
+| **cineplanet-api**, creado por [gersonsebastianx](https://github.com/gersonsebastianx) a partir de este recurso: API documentada por ingeniería inversa, cliente Node.js sin dependencias e interfaz web conversacional para consultar cartelera, funciones y mapas de butacas. | [GitHub](https://github.com/gersonsebastianx/cineplanet-api) | [cineplanet-api.vercel.app](https://cineplanet-api.vercel.app) |
 
-El CLI prioriza la comparación, el ranking de visión y el uso desde agentes;
-el proyecto derivado expone la misma fuente de datos como API y experiencia
-web compartible. Ninguno es una API oficial de Cineplanet: sus endpoints
-públicos pueden cambiar o quedar temporalmente fuera de servicio.
+Gracias a gersonsebastianx por aprovechar este recurso y convertirlo en una
+API y experiencia web compartible. El CLI prioriza la comparación, el ranking
+de visión y el uso desde agentes; `cineplanet-api` expone la fuente de datos
+como API y web conversacional. No es una API oficial de Cineplanet: sus
+endpoints públicos pueden cambiar o quedar temporalmente fuera de servicio.
 
 ## Flujo
 
