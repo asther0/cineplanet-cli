@@ -58,9 +58,6 @@ consultar Cineplanet sin instalar el CLI:
 | --- | --- | --- |
 | **cineplanet-api**, de [gersonsebastianx](https://github.com/gersonsebastianx): experiencia web conversacional con IA para consultar funciones y encontrar entradas de Cineplanet. | [GitHub](https://github.com/gersonsebastianx/cineplanet-api) | [cineplanet-api.vercel.app](https://cineplanet-api.vercel.app) |
 
-`cineplanet-api` convierte esta integración en una experiencia web compartible
-para buscar entradas conversando con IA.
-
 ## Flujo
 
 ```text
