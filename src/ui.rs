@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use ratatui::{
     Frame,
@@ -10,7 +10,8 @@ use ratatui::{
 
 use crate::{
     app::{App, Screen},
-    domain::{Quality, SeatState, SeatingArrangement},
+    domain::{Quality, Recommendation, Seat, SeatState, SeatingArrangement},
+    viewing::{self, ViewingZone},
 };
 
 const BLUE: Color = Color::Rgb(16, 70, 135);
@@ -23,6 +24,7 @@ const ALERT: Color = Color::Rgb(242, 112, 112);
 const PRIME: Color = Color::Rgb(226, 170, 255);
 const DUBBED: Color = Color::Rgb(105, 207, 255);
 const SUBTITLED: Color = Color::Rgb(126, 220, 183);
+const VIEWING_ZONE: Color = Color::Cyan;
 
 const WELCOME_SUBTITLE: &str = "Cartelera y asientos de Cineplanet";
 const WELCOME_TAGLINE: &str = "Encuentra tu mejor función";
@@ -341,7 +343,7 @@ fn render_results(frame: &mut Frame<'_>, area: Rect, app: &App) {
         } else {
             Style::default().fg(SUBTITLED).add_modifier(Modifier::BOLD)
         };
-        ListItem::new(vec![
+        let mut lines = vec![
             Line::from(vec![
                 Span::styled(
                     format!("{}  ", showtime.starts_at.format("%H:%M")),
@@ -374,7 +376,14 @@ fn render_results(frame: &mut Frame<'_>, area: Rect, app: &App) {
                 .chain(result_status_tags(app, showtime))
                 .collect::<Vec<_>>(),
             ),
-        ])
+        ];
+        if let Some(explanation) = result_explanation(app, showtime) {
+            lines.push(Line::from(Span::styled(
+                explanation,
+                Style::default().fg(MUTED),
+            )));
+        }
+        ListItem::new(lines)
     }));
     if visible_showtimes.is_empty() {
         items.push(ListItem::new("No hay funciones que coincidan."));
@@ -436,6 +445,105 @@ fn result_status_tags(app: &App, showtime: &crate::domain::Showtime) -> Vec<Span
         ),
         Span::styled(zone_tag, zone_style),
     ]
+}
+
+fn result_explanation(app: &App, showtime: &crate::domain::Showtime) -> Option<String> {
+    let analysis = app.analyze_showtime(showtime)?;
+    (analysis.arrangement != SeatingArrangement::Scattered
+        && analysis.block.len() == app.preferences().party_size)
+        .then(|| compact_viewing_explanation(&analysis))
+}
+
+fn compact_viewing_explanation(recommendation: &Recommendation) -> String {
+    let seats = &recommendation.block;
+    let row = seats.first().map(|seat| seat.row.as_str()).unwrap_or("?");
+    let seat_ranges = seat_ranges(seats);
+    let zone = match recommendation.quality {
+        Quality::Excellent | Quality::Good => "zona central media-trasera",
+        Quality::Unfavorable => "zona poco favorable",
+    };
+    let aisle = matches!(
+        recommendation.arrangement,
+        SeatingArrangement::AcrossAisle { .. }
+    )
+    .then_some(" · separados por pasillo")
+    .unwrap_or_default();
+    format!(
+        "Fila {row} · asientos {seat_ranges}{aisle} · {zone} · visión {}/100",
+        recommendation.visual_score.round() as u8
+    )
+}
+
+fn seat_ranges(seats: &[Seat]) -> String {
+    let mut seats = seats.to_vec();
+    seats.sort_by_key(|seat| (seat.x, seat.number));
+    let mut ranges = Vec::new();
+    let mut start = seats.first().map(|seat| seat.number).unwrap_or_default();
+    let mut previous = seats.first();
+    for seat in seats.iter().skip(1) {
+        if previous.is_some_and(|last| seat.x == last.x + 1 && seat.number == last.number + 1) {
+            previous = Some(seat);
+            continue;
+        }
+        let end = previous
+            .expect("a nonempty seat group has a previous seat")
+            .number;
+        ranges.push(number_range(start, end));
+        start = seat.number;
+        previous = Some(seat);
+    }
+    if let Some(last) = previous {
+        ranges.push(number_range(start, last.number));
+    }
+    ranges.join(" y ")
+}
+
+fn number_range(start: u16, end: u16) -> String {
+    if start == end {
+        start.to_string()
+    } else {
+        format!("{start}–{end}")
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ZoneOutline {
+    pub top: bool,
+    pub right: bool,
+    pub bottom: bool,
+    pub left: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SeatMapMark {
+    ZoneOutline(ZoneOutline),
+    Recommended,
+}
+
+/// Returns only the perimeter cells of a viewing zone.  The selected seats
+/// are inserted last so the gold recommendation always overrides the edge.
+pub fn seat_map_marks(
+    zone: &ViewingZone,
+    recommended_positions: impl IntoIterator<Item = (u16, u16)>,
+) -> BTreeMap<(u16, u16), SeatMapMark> {
+    let mut marks = BTreeMap::new();
+    for span in &zone.spans {
+        for x in span.start_x..=span.end_x {
+            let outline = ZoneOutline {
+                top: !zone.contains(x, span.y.saturating_sub(1)),
+                right: !zone.contains(x.saturating_add(1), span.y),
+                bottom: !zone.contains(x, span.y.saturating_add(1)),
+                left: !zone.contains(x.saturating_sub(1), span.y),
+            };
+            if outline != ZoneOutline::default() {
+                marks.insert((x, span.y), SeatMapMark::ZoneOutline(outline));
+            }
+        }
+    }
+    for position in recommended_positions {
+        marks.insert(position, SeatMapMark::Recommended);
+    }
+    marks
 }
 
 fn render_date_filter(frame: &mut Frame<'_>, area: Rect, app: &App) {
@@ -676,6 +784,7 @@ fn render_seat_map(frame: &mut Frame<'_>, area: Rect, app: &App) {
     }
     let recommended: BTreeSet<_> = app
         .current_recommendation()
+        .filter(|recommendation| recommendation.arrangement != SeatingArrangement::Scattered)
         .map(|recommendation| {
             recommendation
                 .block
@@ -684,6 +793,13 @@ fn render_seat_map(frame: &mut Frame<'_>, area: Rect, app: &App) {
                 .collect()
         })
         .unwrap_or_default();
+    let zone = viewing::good_viewing_zone(map);
+    let recommended_positions = map
+        .seats
+        .iter()
+        .filter(|seat| recommended.contains(&seat.id) && seat.state == SeatState::Available)
+        .map(|seat| (seat.x, seat.y));
+    let marks = seat_map_marks(&zone, recommended_positions);
 
     let useful_map_width = usize::from(map.columns).saturating_mul(3).saturating_add(4);
     let screen_width = useful_map_width.min(usize::from(area.width.saturating_sub(2)));
@@ -715,13 +831,17 @@ fn render_seat_map(frame: &mut Frame<'_>, area: Rect, app: &App) {
                 spans.push(Span::raw("   "));
                 continue;
             };
-            let (symbol, style) = if recommended.contains(seat.id.as_str()) {
+            let (symbol, style) = if matches!(marks.get(&(x, y)), Some(SeatMapMark::Recommended)) {
                 ("██ ", Style::default().fg(Color::Black).bg(GOLD))
             } else {
                 match seat.state {
-                    SeatState::Available => ("□  ", Style::default().fg(Color::Blue)),
-                    SeatState::Occupied => ("■  ", Style::default().fg(MUTED)),
-                    SeatState::Accessible => ("◇  ", Style::default().fg(Color::Cyan)),
+                    SeatState::Available => {
+                        ("□  ", zone_edge_style(marks.get(&(x, y)), Color::Blue))
+                    }
+                    SeatState::Occupied => ("■  ", zone_edge_style(marks.get(&(x, y)), MUTED)),
+                    SeatState::Accessible => {
+                        ("◇  ", zone_edge_style(marks.get(&(x, y)), Color::Cyan))
+                    }
                 }
             };
             spans.push(Span::styled(symbol, style));
@@ -731,7 +851,9 @@ fn render_seat_map(frame: &mut Frame<'_>, area: Rect, app: &App) {
     lines.push(Line::from(""));
     lines.push(Line::from(vec![
         Span::styled("██ ", Style::default().fg(Color::Black).bg(GOLD)),
-        Span::raw(" recomendado   "),
+        Span::raw(" asientos recomendados   "),
+        Span::styled("□ ", Style::default().fg(VIEWING_ZONE).bg(BLUE)),
+        Span::raw(" zona de buena visión   "),
         Span::styled("□ ", Style::default().fg(Color::Blue)),
         Span::raw("disponible   "),
         Span::styled("■ ", Style::default().fg(MUTED)),
@@ -750,6 +872,13 @@ fn render_seat_map(frame: &mut Frame<'_>, area: Rect, app: &App) {
             ))),
         area,
     );
+}
+
+fn zone_edge_style(mark: Option<&SeatMapMark>, foreground: Color) -> Style {
+    match mark {
+        Some(SeatMapMark::ZoneOutline(_)) => Style::default().fg(VIEWING_ZONE).bg(BLUE),
+        _ => Style::default().fg(foreground),
+    }
 }
 
 fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App) {
@@ -793,7 +922,9 @@ mod tests {
         domain::{Catalog, Preferences, Seat, SeatMap, SeatState},
     };
 
-    use super::render;
+    use crate::viewing::{ViewingZone, ViewingZoneSpan};
+
+    use super::{SeatMapMark, compact_viewing_explanation, render, seat_map_marks};
 
     fn app_with_results() -> App {
         app_with_results_from_catalog(
@@ -1028,6 +1159,11 @@ mod tests {
                 .iter()
                 .any(|line| line.contains("[MAPA NO DISPONIBLE]"))
         );
+        assert!(lines.iter().any(|line| {
+            line.contains("Fila G")
+                && line.contains("asientos 5–6")
+                && line.contains("visión 100/100")
+        }));
     }
 
     #[test]
@@ -1087,6 +1223,87 @@ mod tests {
             .map(|line| line.matches("██").count())
             .sum::<usize>();
         assert_eq!(highlighted, 5);
+    }
+
+    #[test]
+    fn seat_map_labels_viewing_zone_separately_from_recommended_seats() {
+        let mut app = app_with_results();
+        app.apply(Action::Down).unwrap();
+        app.apply(Action::Confirm).unwrap();
+
+        let lines = rendered_lines(&app);
+
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("zona de buena visión"))
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("asientos recomendados"))
+        );
+    }
+
+    #[test]
+    fn compact_explanation_reports_a_concrete_across_aisle_group_truthfully() {
+        let mut catalog = demo::catalog();
+        catalog.showtimes.truncate(1);
+        catalog.showtimes[0].seat_map = aisle_seat_map();
+        let app = app_with_results_from_catalog(
+            catalog,
+            Preferences {
+                onboarding_complete: true,
+                city: Some("Lima".into()),
+                party_size: 5,
+                ..Preferences::default()
+            },
+        );
+
+        let explanation =
+            compact_viewing_explanation(&app.analyze_showtime(&app.result_showtimes()[0]).unwrap());
+
+        assert!(explanation.contains("Fila G · asientos 1–4 y 5"));
+        assert!(explanation.contains("separados por pasillo"));
+        assert!(explanation.contains("visión "));
+    }
+
+    #[test]
+    fn zone_outline_tracks_orientation_gaps_and_selected_seat_precedence() {
+        let zone = ViewingZone {
+            score_threshold: 72.0,
+            spans: vec![
+                ViewingZoneSpan {
+                    y: 3,
+                    start_x: 2,
+                    end_x: 4,
+                },
+                ViewingZoneSpan {
+                    y: 4,
+                    start_x: 2,
+                    end_x: 2,
+                },
+                ViewingZoneSpan {
+                    y: 4,
+                    start_x: 4,
+                    end_x: 5,
+                },
+            ],
+        };
+
+        let marks = seat_map_marks(&zone, [(2, 3)]);
+
+        assert_eq!(marks[&(2, 3)], SeatMapMark::Recommended);
+        assert!(
+            matches!(marks[&(3, 3)], SeatMapMark::ZoneOutline(edge) if edge.top && edge.bottom)
+        );
+        assert!(matches!(marks[&(4, 3)], SeatMapMark::ZoneOutline(edge) if edge.top && edge.right));
+        assert!(
+            matches!(marks[&(2, 4)], SeatMapMark::ZoneOutline(edge) if edge.right && edge.bottom)
+        );
+        assert!(
+            matches!(marks[&(4, 4)], SeatMapMark::ZoneOutline(edge) if edge.left && edge.bottom)
+        );
     }
 
     #[test]

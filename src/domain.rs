@@ -116,6 +116,8 @@ pub struct Recommendation {
     pub reasons: Vec<String>,
     #[serde(skip)]
     pub score: f64,
+    #[serde(skip)]
+    pub visual_score: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

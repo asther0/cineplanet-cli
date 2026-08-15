@@ -1,0 +1,17 @@
+{
+  "ResponseCode": "0",
+  "ErrorDescription": null,
+  "SeatLayoutData": {
+    "Areas": [{
+      "Number": 1, "Left": 42, "Top": 90, "ColumnCount": 9, "RowCount": 5,
+      "Rows": [
+        {"PhysicalName": "C", "Seats": [
+          {"Id":"1", "Status":0, "Position":{"AreaNumber":1,"RowIndex":0,"ColumnIndex":0}},
+          {"Id":"2", "Status":0, "Position":{"AreaNumber":1,"RowIndex":0,"ColumnIndex":1}},
+          {"Id":"3", "Status":1, "Position":{"AreaNumber":1,"RowIndex":0,"ColumnIndex":5}}
+        ]},
+        {"PhysicalName": "B", "Seats": [{"Id":"1", "Status":3, "Position":{"AreaNumber":1,"RowIndex":3,"ColumnIndex":4}}]}
+      ]
+    }]
+  }
+}

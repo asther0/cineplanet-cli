@@ -26,6 +26,18 @@ pub struct CineplanetClient {
     client: Client,
 }
 
+#[derive(Debug, Default)]
+pub struct HydrationOutcome {
+    pub showtimes: Vec<Showtime>,
+    pub failures: Vec<HydrationFailure>,
+}
+
+#[derive(Debug)]
+pub struct HydrationFailure {
+    pub showtime_id: String,
+    pub message: String,
+}
+
 impl CineplanetClient {
     pub async fn connect() -> Result<Self> {
         let client = Client::builder()
@@ -50,16 +62,34 @@ impl CineplanetClient {
         build_catalog(movies, cinemas, sessions)
     }
 
-    pub async fn hydrate_showtimes(&self, showtimes: &[Showtime]) -> Result<Vec<Showtime>> {
+    pub async fn hydrate_showtimes(&self, showtimes: &[Showtime]) -> HydrationOutcome {
         let results = stream::iter(showtimes.iter().cloned().map(|showtime| {
             let client = self.clone();
-            async move { client.hydrate_showtime(showtime).await }
+            async move {
+                let id = showtime.id.clone();
+                (id, client.hydrate_showtime(showtime).await)
+            }
         }))
         .buffer_unordered(8)
-        .collect::<Vec<Result<Showtime>>>()
+        .collect::<Vec<(String, Result<Showtime>)>>()
         .await;
-
-        Ok(extract_ok_results(results))
+        let mut outcome = HydrationOutcome::default();
+        for (showtime_id, result) in results {
+            match result {
+                Ok(showtime) => outcome.showtimes.push(showtime),
+                Err(error) => outcome.failures.push(HydrationFailure {
+                    showtime_id,
+                    message: error.to_string(),
+                }),
+            }
+        }
+        outcome
+            .showtimes
+            .sort_by(|left, right| left.id.cmp(&right.id));
+        outcome
+            .failures
+            .sort_by(|left, right| left.showtime_id.cmp(&right.showtime_id));
+        outcome
     }
 
     async fn hydrate_showtime(&self, showtime: Showtime) -> Result<Showtime> {
@@ -110,10 +140,6 @@ fn apply_seat_plan(showtime: Showtime, response: SeatPlanResponse) -> Result<Sho
     let mut showtime = showtime;
     showtime.seat_map = seat_map;
     Ok(showtime)
-}
-
-fn extract_ok_results<T>(results: Vec<Result<T>>) -> Vec<T> {
-    results.into_iter().filter_map(Result::ok).collect()
 }
 
 pub async fn load_catalog() -> Result<(CineplanetClient, Catalog)> {
@@ -446,7 +472,10 @@ mod tests {
 
     #[test]
     fn parses_a_realistic_seat_layout_without_exposing_remote_data() {
-        let response: SeatPlanResponse = serde_json::from_str(r#"{"ResponseCode":"0","ErrorDescription":null,"SeatLayoutData":{"Areas":[{"Number":1,"Left":42,"Top":90,"ColumnCount":10,"RowCount":3,"Rows":[{"PhysicalName":"G","Seats":[{"Id":"7","Status":0,"Position":{"AreaNumber":1,"RowIndex":0,"ColumnIndex":6}},{"Id":"8","Status":1,"Position":{"AreaNumber":1,"RowIndex":0,"ColumnIndex":7}}]}]}]}}"#).unwrap();
+        let response: SeatPlanResponse = serde_json::from_str(include_str!(
+            "../tests/fixtures/cineplanet/seat-plan-basic.json"
+        ))
+        .unwrap();
         let map = seat_map_from(response.seat_layout_data.unwrap()).unwrap();
         assert_eq!(map.rows, 3);
         assert_eq!(map.columns, 10);
@@ -467,7 +496,10 @@ mod tests {
 
     #[test]
     fn preserves_official_gaps_orientation_and_accessible_places() {
-        let response: SeatPlanResponse = serde_json::from_str(r#"{"ResponseCode":"0","ErrorDescription":null,"SeatLayoutData":{"Areas":[{"Number":1,"Left":42,"Top":90,"ColumnCount":9,"RowCount":5,"Rows":[{"PhysicalName":"C","Seats":[{"Id":"1","Status":0,"Position":{"AreaNumber":1,"RowIndex":0,"ColumnIndex":0}},{"Id":"2","Status":0,"Position":{"AreaNumber":1,"RowIndex":0,"ColumnIndex":1}},{"Id":"3","Status":1,"Position":{"AreaNumber":1,"RowIndex":0,"ColumnIndex":5}}]},{"PhysicalName":"B","Seats":[{"Id":"1","Status":3,"Position":{"AreaNumber":1,"RowIndex":3,"ColumnIndex":4}}]}]}]}}"#).unwrap();
+        let response: SeatPlanResponse = serde_json::from_str(include_str!(
+            "../tests/fixtures/cineplanet/seat-plan-geometry.json"
+        ))
+        .unwrap();
 
         let map = seat_map_from(response.seat_layout_data.unwrap()).unwrap();
 
@@ -702,18 +734,6 @@ mod tests {
             msg.contains("no entregó el mapa"),
             "expected delivery error, got: {msg}"
         );
-    }
-
-    #[test]
-    fn batch_partial_success_keeps_only_ok_results() {
-        let results: Vec<Result<Showtime>> = vec![
-            Ok(make_test_showtime("ok-1")),
-            Err(anyhow::anyhow!("fail-1")),
-            Ok(make_test_showtime("ok-2")),
-        ];
-        let successful = extract_ok_results(results);
-        assert_eq!(successful.len(), 2);
-        assert!(successful.iter().all(|s| s.id.starts_with("ok")));
     }
 
     #[tokio::test]
