@@ -73,6 +73,17 @@ pub struct RankedShowtimeV1 {
     pub available_seat_count: usize,
     pub viewing: ViewingV1,
     pub selected_block: Option<SelectedBlockV1>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub checkout_handoff: Option<CheckoutHandoffV1>,
+}
+#[derive(Debug, Serialize)]
+pub struct CheckoutHandoffV1 {
+    pub movie_slug: String,
+    pub cinema_id: String,
+    pub session_id: String,
+    pub seat_selection_url: String,
+    pub selected_seat_labels: Vec<String>,
+    pub browser_session_required: bool,
 }
 #[derive(Debug, Serialize)]
 pub struct VenueV1 {
@@ -259,6 +270,15 @@ pub fn build_response(
                 &recommendation.block,
                 &recommendation.arrangement,
             );
+            let checkout_handoff = (recommendation.arrangement != SeatingArrangement::Scattered
+                && recommendation.block.len() == query.party_size)
+                .then(|| {
+                    checkout_handoff(
+                        &showtime,
+                        recommendation.block.iter().map(seat_label).collect(),
+                    )
+                })
+                .flatten();
             let selected_block = (recommendation.arrangement != SeatingArrangement::Scattered)
                 .then(|| SelectedBlockV1 {
                     arrangement: recommendation.arrangement,
@@ -297,6 +317,7 @@ pub fn build_response(
                     reasons: recommendation.reasons,
                 },
                 selected_block,
+                checkout_handoff,
             }
         })
         .collect();
@@ -311,6 +332,34 @@ pub fn build_response(
             map_failures: outcome.failures.into_iter().map(map_failure).collect(),
         },
     }
+}
+
+fn checkout_handoff(
+    showtime: &Showtime,
+    selected_seat_labels: Vec<String>,
+) -> Option<CheckoutHandoffV1> {
+    let movie_slug = showtime.movie_details_url.as_deref()?.trim_matches('/');
+    let session_id = showtime.session_id.as_deref()?;
+    if movie_slug.is_empty() || session_id.is_empty() {
+        return None;
+    }
+    let cinema_id = showtime.venue_id.clone();
+    Some(CheckoutHandoffV1 {
+        movie_slug: movie_slug.to_owned(),
+        cinema_id: cinema_id.clone(),
+        session_id: session_id.to_owned(),
+        seat_selection_url: format!(
+            "https://www.cineplanet.com.pe/compra/{movie_slug}/{cinema_id}/{session_id}/asientos"
+        ),
+        selected_seat_labels,
+        // Cineplanet encrypts add-tickets in its browser flow; the resulting
+        // guest hold belongs to that browser session and cannot be replayed.
+        browser_session_required: true,
+    })
+}
+
+fn seat_label(seat: &crate::domain::Seat) -> String {
+    seat.id.clone()
 }
 fn map_failure(failure: HydrationFailure) -> MapFailureV1 {
     MapFailureV1 {
@@ -453,5 +502,52 @@ mod tests {
             DateTime::parse_from_rfc3339(value["observed_at"].as_str().unwrap()).is_ok(),
             "observed_at JSON value must round-trip through RFC 3339"
         );
+    }
+
+    #[test]
+    fn exposes_live_checkout_handoff_for_a_complete_non_scattered_block() {
+        let mut hydrated = crate::demo::catalog().showtimes.into_iter().next().unwrap();
+        hydrated.movie_details_url = Some("la-odisea".into());
+        hydrated.venue_id = "0000000007".into();
+        hydrated.session_id = Some("66776".into());
+        let response = build_response(
+            QueryV1 {
+                movie_id: "movie".into(),
+                movie_title: "Movie".into(),
+                city: "Lima".into(),
+                party_size: 2,
+                dates: Vec::new(),
+                venues: Vec::new(),
+                languages: Vec::new(),
+                formats: Vec::new(),
+                room_types: Vec::new(),
+                favorite_venues: Vec::new(),
+                limit: 1,
+            },
+            1,
+            &Preferences::default(),
+            1,
+            HydrationOutcome {
+                showtimes: vec![hydrated],
+                failures: Vec::new(),
+            },
+        );
+
+        let recommendation = &response.recommendations[0];
+        let selected_block = recommendation.selected_block.as_ref().unwrap();
+        assert_ne!(selected_block.arrangement, SeatingArrangement::Scattered);
+        assert_eq!(selected_block.seats.len(), response.query.party_size);
+
+        let handoff = recommendation.checkout_handoff.as_ref().unwrap();
+        assert_eq!(handoff.movie_slug, "la-odisea");
+        assert_eq!(handoff.cinema_id, "0000000007");
+        assert_eq!(handoff.session_id, "66776");
+        assert_eq!(
+            handoff.seat_selection_url,
+            "https://www.cineplanet.com.pe/compra/la-odisea/0000000007/66776/asientos"
+        );
+        assert!(handoff.browser_session_required);
+        let json = to_json(&response).unwrap();
+        assert!(!json.contains("seat_map"));
     }
 }

@@ -1,6 +1,6 @@
 ---
 name: cineplanet-recommend
-description: Find Cineplanet movies, showtimes, and best available seats. Use for natural-language requests about Cineplanet films, cities, venues, formats, earliest availability, contiguous groups, or seat recommendations.
+description: Find Cineplanet movies, showtimes, and best available seats. Use for natural-language requests about Cineplanet films, cities, venues, formats, earliest availability, contiguous groups, or seat recommendations, including follow-ups to continue, revalidate or hold seats, or open guest checkout.
 ---
 
 # Cineplanet Recommendations
@@ -36,4 +36,31 @@ Use the deterministic, noninteractive JSON command only; never drive the TUI.
 4. Parse the JSON response. Require `version` to be `v1`. Trust its `recommendations` order, `viewing.score`, `viewing.zone`, reason codes, and selected block; never recompute rankings from seat maps. Every successful response also includes a top-level `observed_at` (RFC 3339, UTC); surface that timestamp to the user as the freshness of the recommendation, e.g. "observado a las 2026-08-15T12:34:56+00:00".
 5. State that availability was observed for this query and can change. Quote the `observed_at` value when describing how fresh the result is, and re-run the command if the user asks about anything more recent. Report any `diagnostics.map_failures` as partial map failures; report an empty result rather than inventing an alternative. Surface the versioned JSON error envelope on failure. Note that error envelopes intentionally do not include `observed_at` because they do not represent observed availability.
 
-This skill is read-only. Never log in, reserve, hold seats, or buy tickets.
+## Checkout handoff
+
+Natural-language recommendations are read-only by default. Do not open a
+checkout merely because a user asks for movie times, seats, or a
+recommendation.
+
+An explicit request to **continue**, **hold**, or **open checkout** is the
+only handoff trigger. In that case:
+
+1. Immediately rerun the same `recommend` request to revalidate availability;
+   do not reuse a prior JSON response. Select the requested recommendation and
+   require its `checkout_handoff` object. If it is absent, explain that no
+   official live handoff is available.
+2. State that this is browser-assisted: Cineplanet encrypts `add-tickets`, and
+   the resulting guest hold is bound to that browser session. A copied URL is
+   not portable to another browser or session.
+3. Use Chrome or Browser to open `checkout_handoff.seat_selection_url` on the
+   official Cineplanet site. Click **only** the exact
+   `selected_seat_labels` returned by the renewed recommendation. Verify the
+   site shows those same labels as selected before continuing. If any label is
+   unavailable or verification differs, stop and report it; do not substitute
+   seats.
+4. Click Continue, choose **Seguir como invitado**, and stop when the URL ends
+   in `/entradas`. Leave that tab open. Report its URL and warn that the hold
+   is roughly five minutes and expires with the browser session.
+
+Never log in or choose a ticket category, promotion, concessions, payment
+method, or submit payment. Do not proceed beyond `/entradas`.

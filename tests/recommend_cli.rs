@@ -46,6 +46,10 @@ fn recommend_in_demo_returns_a_versioned_json_contract_without_seat_maps() {
     assert_eq!(json["version"], "v1");
     assert_eq!(json["query"]["movie_title"], "La Odisea");
     assert!(json["recommendations"][0].get("seat_map").is_none());
+    assert!(
+        json["recommendations"][0].get("checkout_handoff").is_none(),
+        "demo data must remain valid even when no official checkout URL exists"
+    );
     assert!(json["recommendations"][0]["selected_block"].is_object());
     assert_eq!(
         json["recommendations"][0]["viewing"]["zone"]["id"],

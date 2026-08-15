@@ -7,6 +7,11 @@ use serde::{Deserialize, Serialize};
 pub struct Movie {
     pub id: String,
     pub title: String,
+    /// Official Cineplanet `movieDetailsUrl` slug, when the catalog was
+    /// loaded from the live adapter. Demo and older persisted fixtures do not
+    /// have a checkout destination.
+    #[serde(default)]
+    pub movie_details_url: Option<String>,
     pub duration_minutes: Option<u16>,
     pub genre: Option<String>,
     pub rating: Option<String>,
@@ -55,8 +60,15 @@ pub struct Showtime {
     pub id: String,
     pub movie_id: String,
     pub movie_title: String,
+    /// Copied from the movie so a hydrated recommendation retains its
+    /// official checkout destination without requiring a second catalog lookup.
+    #[serde(default)]
+    pub movie_details_url: Option<String>,
     pub venue_id: String,
     pub venue_name: String,
+    /// The official session identifier used by Cineplanet's checkout URL.
+    #[serde(default)]
+    pub session_id: Option<String>,
     pub starts_at: DateTime<FixedOffset>,
     pub modality: Modality,
     pub seat_map: SeatMap,

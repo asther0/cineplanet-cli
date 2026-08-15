@@ -195,8 +195,13 @@ fn build_catalog(
                         id: session.id.clone(),
                         movie_id: movie.id.clone(),
                         movie_title: title.clone(),
+                        movie_details_url: movie.movie_details_url.clone(),
                         venue_id: cinema.cinema_id.clone(),
                         venue_name: (*venue_name).into(),
+                        session_id: checkout_session_id(
+                            session.session_id.as_deref(),
+                            &session.id,
+                        ),
                         starts_at,
                         modality: Modality {
                             projection_format: projection_format(&session.formats),
@@ -219,6 +224,7 @@ fn build_catalog(
         domain_movies.push(Movie {
             id: movie.id,
             title,
+            movie_details_url: movie.movie_details_url,
             duration_minutes: movie.run_time,
             genre: movie.genre,
             rating: movie.rating_description,
@@ -242,6 +248,21 @@ fn normalize_language(raw: &str) -> String {
         "" => "Sin especificar".into(),
         _ => trimmed.into(),
     }
+}
+
+fn checkout_session_id(
+    official_session_id: Option<&str>,
+    cached_session_id: &str,
+) -> Option<String> {
+    if let Some(session_id) = official_session_id.filter(|session_id| !session_id.is_empty()) {
+        return Some(session_id.to_owned());
+    }
+
+    let checkout_id = cached_session_id
+        .rsplit_once('-')
+        .map(|(_, id)| id)
+        .unwrap_or(session_id);
+    (!checkout_id.is_empty()).then(|| checkout_id.to_owned())
 }
 
 fn projection_format(formats: &[String]) -> String {
@@ -360,6 +381,8 @@ struct ApiMovie {
     id: String,
     title: String,
     #[serde(default)]
+    movie_details_url: Option<String>,
+    #[serde(default)]
     is_coming_soon: bool,
     #[serde(default)]
     run_time: Option<u16>,
@@ -399,6 +422,8 @@ struct SessionsResponse {
 #[serde(rename_all = "camelCase")]
 struct ApiSession {
     id: String,
+    #[serde(default)]
+    session_id: Option<String>,
     showtime: String,
     #[serde(default)]
     screen_name: String,
@@ -464,8 +489,10 @@ mod tests {
             id: id.into(),
             movie_id: "movie-1".into(),
             movie_title: "Test Movie".into(),
+            movie_details_url: None,
             venue_id: "venue-1".into(),
             venue_name: "Test Venue".into(),
+            session_id: None,
             starts_at: DateTime::parse_from_rfc3339("2024-01-01T12:00:00-05:00").unwrap(),
             modality: Modality {
                 projection_format: "2D".into(),
@@ -492,6 +519,20 @@ mod tests {
         assert_eq!(map.seats[0].y, 2);
         assert_eq!(map.seats[0].state, SeatState::Available);
         assert_eq!(map.seats[1].state, SeatState::Occupied);
+    }
+
+    #[test]
+    fn prefers_official_checkout_session_ids_with_a_cached_id_fallback() {
+        assert_eq!(
+            checkout_session_id(Some("85899"), "0000000001-85899"),
+            Some("85899".into())
+        );
+        assert_eq!(
+            checkout_session_id(Some(""), "0000000007-66776"),
+            Some("66776".into())
+        );
+        assert_eq!(checkout_session_id(None, "66776"), Some("66776".into()));
+        assert_eq!(checkout_session_id(None, ""), None);
     }
 
     #[test]

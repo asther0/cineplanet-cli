@@ -323,8 +323,10 @@ mod tests {
             id: "test".into(),
             movie_id: "movie".into(),
             movie_title: "Movie".into(),
+            movie_details_url: None,
             venue_id: "venue".into(),
             venue_name: "Venue".into(),
+            session_id: None,
             starts_at: DateTime::parse_from_rfc3339("2026-08-10T20:30:00-05:00").unwrap(),
             modality: Modality {
                 projection_format: "2D".into(),

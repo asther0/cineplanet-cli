@@ -7,6 +7,7 @@ pub fn catalog() -> Catalog {
         Movie {
             id: "spider-man".into(),
             title: "Spider-Man: Un nuevo día".into(),
+            movie_details_url: None,
             duration_minutes: Some(145),
             genre: Some("Acción".into()),
             rating: Some("APT".into()),
@@ -14,6 +15,7 @@ pub fn catalog() -> Catalog {
         Movie {
             id: "odyssey".into(),
             title: "La Odisea".into(),
+            movie_details_url: None,
             duration_minutes: Some(132),
             genre: Some("Aventura".into()),
             rating: Some("+14".into()),
@@ -21,6 +23,7 @@ pub fn catalog() -> Catalog {
         Movie {
             id: "toy-story".into(),
             title: "Toy Story 5".into(),
+            movie_details_url: None,
             duration_minutes: Some(104),
             genre: Some("Animación".into()),
             rating: Some("APT".into()),
@@ -140,8 +143,10 @@ pub fn catalog() -> Catalog {
                     id: format!("demo-{index}"),
                     movie_id: (*movie_id).into(),
                     movie_title: movie.title.clone(),
+                    movie_details_url: movie.movie_details_url.clone(),
                     venue_id: (*venue_id).into(),
                     venue_name: venue.name.clone(),
+                    session_id: None,
                     starts_at: now + Duration::hours(*hours) + Duration::minutes(*display_hour),
                     modality: Modality {
                         projection_format: (*format).into(),

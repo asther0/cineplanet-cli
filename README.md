@@ -52,7 +52,7 @@ cineplanet-cli recommend \
   --favorite-venue la-molina --limit 3
 ```
 
-El selector de película es exactamente uno de `--movie-id` o `--movie-title`; ciudad y grupo (`1` a `5`) son obligatorios. Repite `--date`, `--venue`, `--language`, `--format`, `--room-type` y `--favorite-venue` para varios valores. Las fechas usan `YYYY-MM-DD` en America/Lima. La respuesta `v1` contiene `observed_at` (RFC 3339 en UTC, momento en que la CLI observó la disponibilidad), `query`, recomendaciones ordenadas con `venue`, `starts_at`, `modality`, `viewing` (score, calidad, zona y razones), `selected_block`, y `diagnostics` (`candidate_count`, `hydrated_count`, `map_failures`). `observed_at` no aparece en sobres de error.
+El selector de película es exactamente uno de `--movie-id` o `--movie-title`; ciudad y grupo (`1` a `5`) son obligatorios. Repite `--date`, `--venue`, `--language`, `--format`, `--room-type` y `--favorite-venue` para varios valores. Las fechas usan `YYYY-MM-DD` en America/Lima. La respuesta `v1` contiene `observed_at` (RFC 3339 en UTC, momento en que la CLI observó la disponibilidad), `query`, recomendaciones ordenadas con `venue`, `starts_at`, `modality`, `viewing` (score, calidad, zona y razones), `selected_block`, y `diagnostics` (`candidate_count`, `hydrated_count`, `map_failures`). Cuando la fuente live entrega los IDs oficiales, cada recomendación añade `checkout_handoff` con el slug, sede, sesión, URL de selección, etiquetas de asientos y el requisito de sesión de navegador. `observed_at` no aparece en sobres de error.
 
 ```json
 {
@@ -61,15 +61,20 @@ El selector de película es exactamente uno de `--movie-id` o `--movie-title`; c
   "recommendations": [{
     "rank": 1,
     "viewing": { "score": 99.7, "zone": { "id": "central_middle_rear" } },
-    "selected_block": { "seats": [{ "row": "G", "number": 6 }, { "row": "G", "number": 7 }] }
+    "selected_block": { "seats": [{ "row": "G", "number": 6 }, { "row": "G", "number": 7 }] },
+    "checkout_handoff": {
+      "movie_slug": "la-odisea", "cinema_id": "0000000007", "session_id": "66776",
+      "seat_selection_url": "https://www.cineplanet.com.pe/compra/la-odisea/0000000007/66776/asientos",
+      "selected_seat_labels": ["G6", "G7"], "browser_session_required": true
+    }
   }],
   "diagnostics": { "map_failures": [] }
 }
 ```
 
-En Codex, el skill repo-scoped `$cineplanet-recommend` se descubre desde `.agents/skills/cineplanet-recommend`; también se activa de forma natural con peticiones como “¿dónde veo La Odisea temprano en Lima para 3?”, “busca 2D subtitulada en San Miguel” o “encuéntrame cuatro asientos juntos”. El agente usa `recommend`, no la TUI, conserva el orden y la evaluación devueltos, y comunica que los asientos son observados y pueden cambiar.
+En Codex, el skill repo-scoped `$cineplanet-recommend` se descubre desde `.agents/skills/cineplanet-recommend`; también se activa de forma natural con peticiones como “¿dónde veo La Odisea temprano en Lima para 3?”, “busca 2D subtitulada en San Miguel” o “encuéntrame cuatro asientos juntos”. El agente usa `recommend`, no la TUI, conserva el orden y la evaluación devueltos, y comunica que los asientos son observados y pueden cambiar. Por defecto solo recomienda. Ante una petición explícita como “continúa con la primera opción y retén los asientos”, vuelve a consultar, usa el navegador sobre la URL oficial, selecciona únicamente las etiquetas recomendadas y se detiene en `/entradas` tras **Seguir como invitado**. Es una asistencia de navegador: `add-tickets` está cifrado y la retención de aproximadamente cinco minutos depende de esa sesión; no es portable. Nunca elige categoría, promoción, confitería ni pago, y nunca envía un pago.
 
-El comando filtra película, ciudad, fecha, sede y modalidad antes de hidratar mapas de sala; filtrar más reduce las consultas posteriores. Si Cineplanet cambia su contrato público, falla explícitamente y no inventa datos. Una falla parcial de mapas aparece en `diagnostics.map_failures`; si no se hidrata ningún candidato con fallas, devuelve un error JSON. No inicia sesión ni reserva, retiene o compra entradas.
+El comando filtra película, ciudad, fecha, sede y modalidad antes de hidratar mapas de sala; filtrar más reduce las consultas posteriores. Si Cineplanet cambia su contrato público, falla explícitamente y no inventa datos. Una falla parcial de mapas aparece en `diagnostics.map_failures`; si no se hidrata ningún candidato con fallas, devuelve un error JSON. La CLI por sí misma no inicia sesión ni reserva, retiene o compra entradas.
 
 ## Roadmap
 
