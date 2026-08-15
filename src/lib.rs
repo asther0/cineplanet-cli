@@ -1,4 +1,5 @@
 pub mod app;
+pub mod checkout;
 pub mod cli;
 pub mod demo;
 pub mod domain;

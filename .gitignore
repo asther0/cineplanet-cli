@@ -9,3 +9,6 @@
 
 # Artefactos de compilación.
 target/
+
+# Runner Playwright local.
+node_modules/

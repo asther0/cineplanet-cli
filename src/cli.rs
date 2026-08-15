@@ -16,6 +16,20 @@ pub enum Command {
     Tui,
     /// Produce recomendaciones como JSON, sin interfaz interactiva.
     Recommend(Box<RecommendArgs>),
+    /// Revalida una recomendación y abre /entradas como invitado.
+    Checkout(Box<CheckoutArgs>),
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct CheckoutArgs {
+    #[command(flatten)]
+    pub recommend: RecommendArgs,
+    /// ID exacto devuelto por `recommend`; no se acepta un rank mutable.
+    #[arg(long)]
+    pub recommendation_id: String,
+    /// Confirma que se puede crear la retención temporal de las butacas.
+    #[arg(long, action = clap::ArgAction::SetTrue)]
+    pub yes: bool,
 }
 
 #[derive(Debug, Clone, Args)]

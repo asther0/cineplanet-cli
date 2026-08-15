@@ -21,7 +21,7 @@ fn recommend_demo(args: &[&str]) -> serde_json::Value {
 }
 
 #[test]
-fn recommend_in_demo_returns_a_versioned_json_contract_without_seat_maps() {
+fn recommend_in_demo_returns_a_versioned_json_contract_with_a_compact_seat_preview() {
     let output = binary()
         .env("CINEPLANET_DEMO", "1")
         .args([
@@ -46,6 +46,23 @@ fn recommend_in_demo_returns_a_versioned_json_contract_without_seat_maps() {
     assert_eq!(json["version"], "v1");
     assert_eq!(json["query"]["movie_title"], "La Odisea");
     assert!(json["recommendations"][0].get("seat_map").is_none());
+    let preview = &json["recommendations"][0]["seat_preview"];
+    assert_eq!(preview["screen"], "PANTALLA");
+    assert_eq!(preview["symbols"]["available"], ".");
+    assert_eq!(preview["symbols"]["occupied"], "#");
+    assert_eq!(preview["symbols"]["accessible"], "A");
+    assert_eq!(preview["symbols"]["recommended"], "*");
+    assert_eq!(preview["symbols"]["aisle"], " ");
+    let rows = preview["rows"].as_array().unwrap();
+    assert!(!rows.is_empty());
+    assert!(
+        rows.iter()
+            .any(|row| row["layout"].as_str().unwrap().contains('*'))
+    );
+    assert!(
+        rows.iter()
+            .all(|row| row["layout"].as_str().unwrap().is_ascii())
+    );
     assert!(
         json["recommendations"][0].get("checkout_handoff").is_none(),
         "demo data must remain valid even when no official checkout URL exists"

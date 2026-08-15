@@ -1,7 +1,8 @@
 use anyhow::Result;
 use cineplanet_cli::{
     app::{Action, App, Effect, Screen},
-    cli::{Cli, Command},
+    checkout,
+    cli::{CheckoutArgs, Cli, Command},
     demo, live, recommendation, settings, ui,
 };
 use clap::{Parser, error::ErrorKind};
@@ -27,7 +28,7 @@ fn main() -> ExitCode {
         Err(error)
             if std::env::args_os()
                 .nth(1)
-                .is_some_and(|arg| arg == "recommend") =>
+                .is_some_and(|arg| arg == "recommend" || arg == "checkout") =>
         {
             emit_recommend_error(recommendation::failure("arguments", error));
             return ExitCode::FAILURE;
@@ -36,6 +37,22 @@ fn main() -> ExitCode {
     };
     match cli.command {
         Some(Command::Recommend(args)) => match run_recommend(*args) {
+            Ok(response) => match recommendation::to_json(&response) {
+                Ok(json) => {
+                    println!("{json}");
+                    ExitCode::SUCCESS
+                }
+                Err(error) => {
+                    emit_recommend_error(recommendation::failure("serialization", error));
+                    ExitCode::FAILURE
+                }
+            },
+            Err(error) => {
+                emit_recommend_error(error);
+                ExitCode::FAILURE
+            }
+        },
+        Some(Command::Checkout(args)) => match run_checkout(*args) {
             Ok(response) => match recommendation::to_json(&response) {
                 Ok(json) => {
                     println!("{json}");
@@ -118,6 +135,55 @@ fn run_recommend(
         &preferences,
         args.limit,
         outcome,
+    ))
+}
+
+fn run_checkout(
+    mut args: CheckoutArgs,
+) -> std::result::Result<checkout::CheckoutResponseV1, recommendation::RecommendError> {
+    if !args.yes {
+        return Err(recommendation::failure(
+            "confirmation",
+            "la retención temporal requiere --yes después de la confirmación del usuario",
+        ));
+    }
+    args.recommend.limit = 1_000;
+    for attempt in 0..2 {
+        let response = run_recommend(args.recommend.clone())?;
+        let selected = response
+            .recommendations
+            .iter()
+            .find(|recommendation| recommendation.id == args.recommendation_id)
+            .ok_or_else(|| {
+                recommendation::failure(
+                    "revalidation",
+                    "la función elegida ya no aparece entre las recomendaciones disponibles",
+                )
+            })?;
+        let handoff = selected.checkout_handoff.as_ref().ok_or_else(|| {
+            recommendation::failure(
+                "revalidation",
+                "la función ya no ofrece un bloque verificable para checkout",
+            )
+        })?;
+        match checkout::open_guest_checkout(
+            selected.id.clone(),
+            selected.venue.name.clone(),
+            selected.starts_at.clone(),
+            handoff,
+        ) {
+            Ok(checkout) => return Ok(checkout),
+            Err(error)
+                if attempt == 0 && error.to_string().contains("guest_session_initialized") =>
+            {
+                continue;
+            }
+            Err(error) => return Err(recommendation::failure("checkout", error)),
+        }
+    }
+    Err(recommendation::failure(
+        "checkout",
+        "Cineplanet no pudo conservar la sesión invitada después de revalidar",
     ))
 }
 

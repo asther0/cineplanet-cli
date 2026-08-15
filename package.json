@@ -1,0 +1,11 @@
+{
+  "name": "cineplanet-cli-browser",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "playwright-core": "1.62.1"
+  }
+}

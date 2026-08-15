@@ -198,10 +198,7 @@ fn build_catalog(
                         movie_details_url: movie.movie_details_url.clone(),
                         venue_id: cinema.cinema_id.clone(),
                         venue_name: (*venue_name).into(),
-                        session_id: checkout_session_id(
-                            session.session_id.as_deref(),
-                            &session.id,
-                        ),
+                        session_id: checkout_session_id(session.session_id.as_deref(), &session.id),
                         starts_at,
                         modality: Modality {
                             projection_format: projection_format(&session.formats),

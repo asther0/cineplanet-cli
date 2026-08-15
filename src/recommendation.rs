@@ -73,6 +73,10 @@ pub struct RankedShowtimeV1 {
     pub available_seat_count: usize,
     pub viewing: ViewingV1,
     pub selected_block: Option<SelectedBlockV1>,
+    /// A compact, deterministic, display-ready representation of the hydrated
+    /// map. It intentionally exposes no identifiers for seats other than the
+    /// selected block above.
+    pub seat_preview: SeatPreviewV1,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub checkout_handoff: Option<CheckoutHandoffV1>,
 }
@@ -83,7 +87,29 @@ pub struct CheckoutHandoffV1 {
     pub session_id: String,
     pub seat_selection_url: String,
     pub selected_seat_labels: Vec<String>,
+    /// Stable identifier that binds a revalidation to this official cinema
+    /// session. Browser clients must reject a URL whose session id differs.
+    pub session_fingerprint: String,
     pub browser_session_required: bool,
+}
+#[derive(Debug, Serialize)]
+pub struct SeatPreviewV1 {
+    pub screen: &'static str,
+    pub symbols: SeatPreviewSymbolsV1,
+    pub rows: Vec<SeatPreviewRowV1>,
+}
+#[derive(Debug, Serialize)]
+pub struct SeatPreviewSymbolsV1 {
+    pub available: &'static str,
+    pub occupied: &'static str,
+    pub accessible: &'static str,
+    pub recommended: &'static str,
+    pub aisle: &'static str,
+}
+#[derive(Debug, Serialize)]
+pub struct SeatPreviewRowV1 {
+    pub label: String,
+    pub layout: String,
 }
 #[derive(Debug, Serialize)]
 pub struct VenueV1 {
@@ -194,9 +220,10 @@ pub fn select_candidates(
     let candidates = candidates
         .filter(|showtime| {
             (args.venues.is_empty()
-                || args.venues.iter().any(|venue| {
-                    venue_matches(venue, &showtime.venue_id, &showtime.venue_name)
-                }))
+                || args
+                    .venues
+                    .iter()
+                    .any(|venue| venue_matches(venue, &showtime.venue_id, &showtime.venue_name)))
                 && matches_any(&args.languages, &showtime.modality.language)
                 && matches_any(&args.formats, &showtime.modality.projection_format)
                 && matches_any(&args.room_types, &showtime.modality.room_type)
@@ -227,7 +254,13 @@ fn normalized_venue_alias(value: &str) -> Option<String> {
     let normalized = value
         .chars()
         .flat_map(char::to_lowercase)
-        .map(|character| if character.is_alphanumeric() { character } else { ' ' })
+        .map(|character| {
+            if character.is_alphanumeric() {
+                character
+            } else {
+                ' '
+            }
+        })
         .collect::<String>();
     let words = normalized
         .split_whitespace()
@@ -302,6 +335,12 @@ pub fn build_response(
                     )
                 })
                 .flatten();
+            let preview_selection = if recommendation.arrangement == SeatingArrangement::Scattered {
+                &[]
+            } else {
+                recommendation.block.as_slice()
+            };
+            let seat_preview = seat_preview(&showtime.seat_map, preview_selection);
             let selected_block = (recommendation.arrangement != SeatingArrangement::Scattered)
                 .then(|| SelectedBlockV1 {
                     arrangement: recommendation.arrangement,
@@ -340,6 +379,7 @@ pub fn build_response(
                     reasons: recommendation.reasons,
                 },
                 selected_block,
+                seat_preview,
                 checkout_handoff,
             }
         })
@@ -375,10 +415,57 @@ fn checkout_handoff(
             "https://www.cineplanet.com.pe/compra/{movie_slug}/{cinema_id}/{session_id}/asientos"
         ),
         selected_seat_labels,
+        session_fingerprint: format!("cineplanet:{cinema_id}:{session_id}"),
         // Cineplanet encrypts add-tickets in its browser flow; the resulting
         // guest hold belongs to that browser session and cannot be replayed.
         browser_session_required: true,
     })
+}
+
+fn seat_preview(map: &crate::domain::SeatMap, selected: &[crate::domain::Seat]) -> SeatPreviewV1 {
+    use crate::domain::SeatState;
+
+    let selected_ids: BTreeSet<_> = selected.iter().map(|seat| seat.id.as_str()).collect();
+    let mut ordered_seats: Vec<_> = map.seats.iter().collect();
+    ordered_seats.sort_by_key(|seat| (seat.y, seat.x, &seat.row, seat.number));
+
+    let rows = (0..map.rows)
+        .map(|y| {
+            let row_seats: Vec<_> = ordered_seats
+                .iter()
+                .copied()
+                .filter(|seat| seat.y == y)
+                .collect();
+            let label = row_seats
+                .first()
+                .map(|seat| seat.row.clone())
+                .unwrap_or_default();
+            let layout = (0..map.columns)
+                .map(|x| match row_seats.iter().find(|seat| seat.x == x) {
+                    None => ' ',
+                    Some(seat) if selected_ids.contains(seat.id.as_str()) => '*',
+                    Some(seat) => match seat.state {
+                        SeatState::Available => '.',
+                        SeatState::Occupied => '#',
+                        SeatState::Accessible => 'A',
+                    },
+                })
+                .collect();
+            SeatPreviewRowV1 { label, layout }
+        })
+        .collect();
+
+    SeatPreviewV1 {
+        screen: "PANTALLA",
+        symbols: SeatPreviewSymbolsV1 {
+            available: ".",
+            occupied: "#",
+            accessible: "A",
+            recommended: "*",
+            aisle: " ",
+        },
+        rows,
+    }
 }
 
 fn seat_label(seat: &crate::domain::Seat) -> String {
@@ -565,13 +652,131 @@ mod tests {
         assert_eq!(handoff.movie_slug, "la-odisea");
         assert_eq!(handoff.cinema_id, "0000000007");
         assert_eq!(handoff.session_id, "66776");
+        assert_eq!(handoff.session_fingerprint, "cineplanet:0000000007:66776");
         assert_eq!(
             handoff.seat_selection_url,
             "https://www.cineplanet.com.pe/compra/la-odisea/0000000007/66776/asientos"
         );
         assert!(handoff.browser_session_required);
-        let json = to_json(&response).unwrap();
-        assert!(!json.contains("seat_map"));
+        let json: serde_json::Value = serde_json::from_str(&to_json(&response).unwrap()).unwrap();
+        assert!(json["recommendations"][0].get("seat_map").is_none());
+        assert_eq!(
+            json["recommendations"][0]["seat_preview"]["screen"],
+            "PANTALLA"
+        );
+    }
+
+    #[test]
+    fn seat_preview_preserves_aisles_states_and_recommended_seats() {
+        use crate::domain::{Seat, SeatMap, SeatState};
+
+        let map = SeatMap {
+            rows: 2,
+            columns: 4,
+            seats: vec![
+                Seat {
+                    id: "A1".into(),
+                    row: "A".into(),
+                    number: 1,
+                    x: 0,
+                    y: 0,
+                    state: SeatState::Available,
+                },
+                Seat {
+                    id: "A3".into(),
+                    row: "A".into(),
+                    number: 3,
+                    x: 2,
+                    y: 0,
+                    state: SeatState::Occupied,
+                },
+                Seat {
+                    id: "B1".into(),
+                    row: "B".into(),
+                    number: 1,
+                    x: 0,
+                    y: 1,
+                    state: SeatState::Accessible,
+                },
+                Seat {
+                    id: "B2".into(),
+                    row: "B".into(),
+                    number: 2,
+                    x: 1,
+                    y: 1,
+                    state: SeatState::Available,
+                },
+            ],
+        };
+        let selected = vec![map.seats[0].clone()];
+
+        let preview = seat_preview(&map, &selected);
+
+        assert_eq!(preview.screen, "PANTALLA");
+        assert_eq!(preview.rows[0].label, "A");
+        assert_eq!(preview.rows[0].layout, "* # ");
+        assert_eq!(preview.rows[1].label, "B");
+        assert_eq!(preview.rows[1].layout, "A.  ");
+    }
+
+    #[test]
+    fn scattered_recommendation_preview_keeps_states_without_a_recommended_marker() {
+        use crate::domain::SeatState;
+
+        let mut hydrated = crate::demo::catalog().showtimes.into_iter().next().unwrap();
+        for (index, seat) in hydrated.seat_map.seats.iter_mut().enumerate() {
+            seat.state = if index == 0 {
+                SeatState::Available
+            } else {
+                SeatState::Occupied
+            };
+        }
+        let response = build_response(
+            QueryV1 {
+                movie_id: "movie".into(),
+                movie_title: "Movie".into(),
+                city: "Lima".into(),
+                party_size: 2,
+                dates: Vec::new(),
+                venues: Vec::new(),
+                languages: Vec::new(),
+                formats: Vec::new(),
+                room_types: Vec::new(),
+                favorite_venues: Vec::new(),
+                limit: 1,
+            },
+            1,
+            &Preferences::default(),
+            1,
+            HydrationOutcome {
+                showtimes: vec![hydrated],
+                failures: Vec::new(),
+            },
+        );
+
+        let recommendation = &response.recommendations[0];
+        assert!(recommendation.selected_block.is_none());
+        assert!(
+            recommendation
+                .seat_preview
+                .rows
+                .iter()
+                .all(|row| !row.layout.contains('*'))
+        );
+        assert!(
+            recommendation
+                .seat_preview
+                .rows
+                .iter()
+                .any(|row| row.layout.contains('.'))
+        );
+        assert!(
+            recommendation
+                .seat_preview
+                .rows
+                .iter()
+                .any(|row| row.layout.contains('#'))
+        );
     }
 
     #[test]
