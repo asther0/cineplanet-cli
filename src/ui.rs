@@ -467,8 +467,13 @@ fn render_date_filter(frame: &mut Frame<'_>, area: Rect, app: &App) {
     } else {
         Style::default().add_modifier(Modifier::BOLD)
     };
+    let continue_label = if app.has_selected_dates() {
+        "Continuar"
+    } else {
+        "Continuar — elige al menos una fecha"
+    };
     items.push(ListItem::new(Line::from(Span::styled(
-        "Continuar",
+        continue_label,
         continue_style,
     ))));
     let mut state = ListState::default().with_selected(Some(app.date_filter_index()));
@@ -519,8 +524,13 @@ fn render_venue_filter(frame: &mut Frame<'_>, area: Rect, app: &App) {
     } else {
         Style::default().add_modifier(Modifier::BOLD)
     };
+    let continue_label = if app.has_selected_venues() {
+        "Continuar"
+    } else {
+        "Continuar — elige al menos una sede"
+    };
     items.push(ListItem::new(Line::from(Span::styled(
-        "Continuar",
+        continue_label,
         continue_style,
     ))));
 
@@ -746,15 +756,17 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App) {
     let help = match app.screen() {
         Screen::Welcome => "Enter comenzar · Q / Ctrl-C salir",
         Screen::CitySetup => "Escribe para filtrar · ↑↓ mover · Enter elegir · Q salir",
-        Screen::VenueSetup => "Escribe para filtrar · ↑↓ mover · Espacio marcar · Enter elegir",
+        Screen::VenueSetup => {
+            "Escribe para filtrar · ↑↓ mover · Espacio marca sin búsqueda · Enter marca · Continuar avanza"
+        }
         Screen::Movies => {
             "Escribe para filtrar · ↑↓ mover · Enter elegir película · Esc sedes · Q salir"
         }
         Screen::DateFilter => {
-            "Escribe para filtrar · ↑↓ mover · Espacio marcar · Enter elegir · Esc volver"
+            "Escribe filtra · Enter marca · Espacio marca sin búsqueda · Continuar con selección · Esc volver"
         }
         Screen::VenueFilter => {
-            "Escribe para filtrar · ↑↓ mover · Espacio marcar · Enter elegir · Esc volver"
+            "Escribe filtra · Enter marca · Espacio marca sin búsqueda · Continuar con selección · Esc volver"
         }
         Screen::PartySize => "↑↓ mover · Enter elegir y continuar · Esc volver · Q salir",
         Screen::SearchSummary => "Enter buscar funciones · Esc volver · Q salir",
@@ -835,6 +847,93 @@ mod tests {
                     .collect()
             })
             .collect()
+    }
+
+    fn app_at_date_filter() -> App {
+        let preferences = Preferences {
+            onboarding_complete: true,
+            city: Some("Lima".into()),
+            ..Preferences::default()
+        };
+        let mut app = App::new(demo::catalog(), preferences);
+        app.apply(Action::Confirm).unwrap();
+        app.apply(Action::Confirm).unwrap();
+        assert_eq!(app.screen(), Screen::DateFilter);
+        app
+    }
+
+    fn app_at_venue_filter() -> App {
+        let mut app = app_at_date_filter();
+        app.apply(Action::Toggle).unwrap();
+        while !app.date_filter_on_continue() {
+            app.apply(Action::Down).unwrap();
+        }
+        app.apply(Action::Confirm).unwrap();
+        assert_eq!(app.screen(), Screen::VenueFilter);
+        app
+    }
+
+    #[test]
+    fn date_filter_explains_why_continue_is_disabled() {
+        let mut app = app_at_date_filter();
+        assert!(
+            rendered_lines(&app)
+                .iter()
+                .any(|line| line.contains("Continuar — elige al menos una fecha"))
+        );
+        assert!(
+            rendered_lines(&app)
+                .iter()
+                .any(|line| line.contains("Escribe filtra · Enter marca"))
+        );
+        assert!(
+            rendered_lines(&app)
+                .iter()
+                .any(|line| line.contains("Espacio marca sin búsqueda"))
+        );
+        assert!(
+            rendered_lines(&app)
+                .iter()
+                .any(|line| line.contains("Continuar con selección"))
+        );
+
+        app.apply(Action::Toggle).unwrap();
+        assert!(rendered_lines(&app).iter().any(
+            |line| line.contains("│  Continuar") && !line.contains("elige al menos una fecha")
+        ));
+    }
+
+    #[test]
+    fn venue_filter_explains_why_continue_is_disabled() {
+        let mut app = app_at_venue_filter();
+        assert!(
+            rendered_lines(&app)
+                .iter()
+                .any(|line| line.contains("Continuar — elige al menos una sede"))
+        );
+        assert!(
+            rendered_lines(&app)
+                .iter()
+                .any(|line| line.contains("Escribe filtra · Enter marca"))
+        );
+        assert!(
+            rendered_lines(&app)
+                .iter()
+                .any(|line| line.contains("Espacio marca sin búsqueda"))
+        );
+        assert!(
+            rendered_lines(&app)
+                .iter()
+                .any(|line| line.contains("Continuar con selección"))
+        );
+
+        app.apply(Action::Toggle).unwrap();
+        assert!(
+            rendered_lines(&app)
+                .iter()
+                .any(|line| line.contains("│  Continuar")
+                    && !line.contains("elige al menos una sede"))
+        );
     }
 
     #[test]

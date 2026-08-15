@@ -169,6 +169,18 @@ impl App {
         &self.result_query
     }
 
+    pub fn active_query_is_nonempty(&self) -> bool {
+        match self.screen {
+            Screen::CitySetup => !self.city_query.is_empty(),
+            Screen::VenueSetup => !self.venue_query.is_empty(),
+            Screen::Movies => !self.query.is_empty(),
+            Screen::DateFilter => !self.date_query.is_empty(),
+            Screen::VenueFilter => !self.venue_filter_query.is_empty(),
+            Screen::Results => !self.result_query.is_empty(),
+            _ => false,
+        }
+    }
+
     pub fn city_index(&self) -> usize {
         self.city_index
     }
@@ -577,21 +589,19 @@ impl App {
                 }
             }
             (Screen::VenueSetup, Action::Confirm) => {
-                if let Some(venue_id) = self
-                    .visible_venues()
-                    .get(self.venue_index)
-                    .map(|venue| venue.id.clone())
-                {
-                    self.preferences.favorite_venue_ids.insert(venue_id);
+                if self.venue_setup_on_continue() {
                     self.preferences.onboarding_complete = true;
                     self.venue_query.clear();
                     self.screen = Screen::Movies;
                     return Ok(Effect::SavePreferences);
                 }
-                if self.venue_setup_on_continue() {
-                    self.preferences.onboarding_complete = true;
-                    self.screen = Screen::Movies;
-                    return Ok(Effect::SavePreferences);
+                if let Some(venue_id) = self
+                    .visible_venues()
+                    .get(self.venue_index)
+                    .map(|venue| venue.id.clone())
+                    && !self.preferences.favorite_venue_ids.remove(&venue_id)
+                {
+                    self.preferences.favorite_venue_ids.insert(venue_id);
                 }
             }
             (Screen::VenueSetup, Action::Back) => {
@@ -704,19 +714,16 @@ impl App {
                 }
             }
             (Screen::DateFilter, Action::Confirm) => {
-                if self.date_filter_on_continue() {
-                    if self.has_selected_dates() {
-                        self.venue_filter_index = 0;
-                        self.screen = Screen::VenueFilter;
-                    }
+                if self.date_filter_on_continue() && self.has_selected_dates() {
+                    self.venue_filter_index = 0;
+                    self.screen = Screen::VenueFilter;
                 } else if let Some(date) = self
                     .visible_filter_dates()
                     .get(self.date_filter_index)
                     .map(|date| (*date).clone())
+                    && !self.selected_filter_dates.remove(&date)
                 {
                     self.selected_filter_dates.insert(date);
-                    self.venue_filter_index = 0;
-                    self.screen = Screen::VenueFilter;
                 }
             }
             (Screen::DateFilter, Action::Back) => {
@@ -754,19 +761,16 @@ impl App {
                 }
             }
             (Screen::VenueFilter, Action::Confirm) => {
-                if self.venue_filter_on_continue() {
-                    if self.has_selected_venues() {
-                        self.party_size_index = self.preferences.party_size.clamp(1, 5) - 1;
-                        self.screen = Screen::PartySize;
-                    }
+                if self.venue_filter_on_continue() && self.has_selected_venues() {
+                    self.party_size_index = self.preferences.party_size.clamp(1, 5) - 1;
+                    self.screen = Screen::PartySize;
                 } else if let Some(venue) = self
                     .visible_filter_venues()
                     .get(self.venue_filter_index)
                     .map(|venue| (*venue).clone())
+                    && !self.selected_filter_venues.remove(&venue)
                 {
                     self.selected_filter_venues.insert(venue);
-                    self.party_size_index = self.preferences.party_size.clamp(1, 5) - 1;
-                    self.screen = Screen::PartySize;
                 }
             }
             (Screen::VenueFilter, Action::Back) => {
@@ -911,7 +915,15 @@ mod tests {
         app.apply(Action::Confirm).unwrap();
         assert_eq!(app.screen(), Screen::DateFilter);
         app.apply(Action::Confirm).unwrap();
+        while !app.date_filter_on_continue() {
+            app.apply(Action::Down).unwrap();
+        }
+        app.apply(Action::Confirm).unwrap();
         assert_eq!(app.screen(), Screen::VenueFilter);
+        app.apply(Action::Confirm).unwrap();
+        while !app.venue_filter_on_continue() {
+            app.apply(Action::Down).unwrap();
+        }
         app.apply(Action::Confirm).unwrap();
         assert_eq!(app.screen(), Screen::PartySize);
         app.apply(Action::Confirm).unwrap();
@@ -970,6 +982,10 @@ mod tests {
         assert_eq!(app.screen(), Screen::VenueSetup);
         app.apply(Action::Toggle).unwrap();
         app.apply(Action::Down).unwrap();
+        app.apply(Action::Confirm).unwrap();
+        while !app.venue_setup_on_continue() {
+            app.apply(Action::Down).unwrap();
+        }
         let effect = app.apply(Action::Confirm).unwrap();
 
         assert_eq!(effect, Effect::SavePreferences);
@@ -1109,6 +1125,10 @@ mod tests {
         assert!(app.visible_filter_dates().contains(&&date));
         app.apply(Action::Confirm).unwrap();
         assert!(app.selected_filter_dates().contains(&date));
+        while !app.date_filter_on_continue() {
+            app.apply(Action::Down).unwrap();
+        }
+        app.apply(Action::Confirm).unwrap();
         assert_eq!(app.screen(), Screen::VenueFilter);
 
         for character in "molina".chars() {
@@ -1295,7 +1315,7 @@ mod tests {
     }
 
     #[test]
-    fn venue_setup_space_marks_more_and_enter_selects_and_advances() {
+    fn venue_setup_space_and_enter_mark_options_then_continue_advances() {
         let mut app = App::new(demo::catalog(), Preferences::default());
         app.apply(Action::Confirm).unwrap();
         app.apply(Action::Confirm).unwrap();
@@ -1307,12 +1327,33 @@ mod tests {
         assert_eq!(app.screen(), Screen::VenueSetup);
 
         app.apply(Action::Down).unwrap();
+        assert_eq!(app.apply(Action::Confirm).unwrap(), Effect::None);
+        while !app.venue_setup_on_continue() {
+            app.apply(Action::Down).unwrap();
+        }
         let effect = app.apply(Action::Confirm).unwrap();
 
         assert_eq!(effect, Effect::SavePreferences);
         assert_eq!(app.preferences().favorite_venue_ids.len(), 2);
         assert_eq!(app.screen(), Screen::Movies);
         assert!(app.preferences().onboarding_complete);
+    }
+
+    #[test]
+    fn venue_setup_enter_toggles_the_highlighted_venue_without_advancing() {
+        let preferences = Preferences {
+            onboarding_complete: true,
+            ..preferences_with_city("Lima")
+        };
+        let mut app = App::new(demo::catalog(), preferences);
+        app.apply(Action::Confirm).unwrap();
+        app.apply(Action::EditVenues).unwrap();
+
+        let venue_id = app.visible_venues()[0].id.clone();
+        assert_eq!(app.apply(Action::Confirm).unwrap(), Effect::None);
+
+        assert!(app.preferences().favorite_venue_ids.contains(&venue_id));
+        assert_eq!(app.screen(), Screen::VenueSetup);
     }
 
     #[test]
@@ -1365,6 +1406,43 @@ mod tests {
         assert!(!app.filter_venues().is_empty());
         assert!(app.selected_filter_dates().is_empty());
         assert!(app.selected_filter_venues().is_empty());
+    }
+
+    #[test]
+    fn date_filter_enter_toggles_the_highlighted_date_without_advancing() {
+        let preferences = Preferences {
+            onboarding_complete: true,
+            ..preferences_with_city("Lima")
+        };
+        let mut app = App::new(demo::catalog(), preferences);
+        app.apply(Action::Confirm).unwrap();
+        app.apply(Action::Confirm).unwrap();
+
+        let date = app.filter_dates()[0].clone();
+        assert_eq!(app.apply(Action::Confirm).unwrap(), Effect::None);
+
+        assert!(app.selected_filter_dates().contains(&date));
+        assert_eq!(app.screen(), Screen::DateFilter);
+    }
+
+    #[test]
+    fn venue_filter_enter_toggles_the_highlighted_venue_without_advancing() {
+        let preferences = Preferences {
+            onboarding_complete: true,
+            ..preferences_with_city("Lima")
+        };
+        let mut app = App::new(demo::catalog(), preferences);
+        app.apply(Action::Confirm).unwrap();
+        app.apply(Action::Confirm).unwrap();
+        app.selected_filter_dates = app.filter_dates.iter().cloned().collect();
+        app.date_filter_index = app.filter_dates.len();
+        app.apply(Action::Confirm).unwrap();
+
+        let venue = app.filter_venues()[0].clone();
+        assert_eq!(app.apply(Action::Confirm).unwrap(), Effect::None);
+
+        assert!(app.selected_filter_venues().contains(&venue));
+        assert_eq!(app.screen(), Screen::VenueFilter);
     }
 
     #[test]
