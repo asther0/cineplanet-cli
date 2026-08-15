@@ -261,7 +261,7 @@ fn checkout_session_id(
     let checkout_id = cached_session_id
         .rsplit_once('-')
         .map(|(_, id)| id)
-        .unwrap_or(session_id);
+        .unwrap_or(cached_session_id);
     (!checkout_id.is_empty()).then(|| checkout_id.to_owned())
 }
 
