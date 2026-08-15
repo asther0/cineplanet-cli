@@ -1,4 +1,4 @@
 interface:
   display_name: "Cineplanet Recommendations"
-  short_description: "Find Cineplanet showtimes and best seats"
-  default_prompt: "Use $cineplanet-recommend to find the best Cineplanet showing and seats."
+  short_description: "Compare Cineplanet options and seat groups accurately"
+  default_prompt: "Use $cineplanet-recommend to compare Cineplanet options. Treat venues in an ordinary scope clause such as en San Miguel o Salaverry as strict repeated --venue filters; only explicit preference wording uses --favorite-venue. Interpret N espacios/lugares/asientos/butacas/entradas as party size, while N opciones/funciones/horarios and top N are comparison limits. Use the compact three-line header and show all three complete seat previews, separated by a horizontal rule. Render recommended cells as the small monochrome person-like text glyph ♟︎; never depend on color or use the oversized gradient 🟧 emoji. Treat reservar/retener/continuar con N as direct checkout authorization: do not ask y/N; a bare N only selects. Then use the repository's single Playwright-backed checkout command; never use Agent Browser, browser MCP, node_repl, screenshots, or coordinate clicks."
