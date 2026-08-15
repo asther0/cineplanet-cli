@@ -203,7 +203,7 @@ fn build_catalog(
                             language: session
                                 .languages
                                 .first()
-                                .cloned()
+                                .map(|lang| normalize_language(lang))
                                 .unwrap_or_else(|| "Sin especificar".into()),
                             room_type: room_type(&session.formats, &session.screen_name),
                         },
@@ -232,6 +232,16 @@ fn build_catalog(
         venues,
         showtimes,
     })
+}
+
+fn normalize_language(raw: &str) -> String {
+    let trimmed = raw.trim();
+    match trimmed.to_ascii_uppercase().as_str() {
+        "SUBTITULAD" | "SUBTITULADA" => "Subtitulada".into(),
+        "DOBLADA" | "DOBLADO" => "Doblada".into(),
+        "" => "Sin especificar".into(),
+        _ => trimmed.into(),
+    }
 }
 
 fn projection_format(formats: &[String]) -> String {
@@ -734,6 +744,31 @@ mod tests {
             msg.contains("no entregó el mapa"),
             "expected delivery error, got: {msg}"
         );
+    }
+
+    #[test]
+    fn normalize_language_maps_known_provider_labels_to_canonical_forms() {
+        assert_eq!(normalize_language("SUBTITULAD"), "Subtitulada");
+        assert_eq!(normalize_language("SUBTITULADA"), "Subtitulada");
+        assert_eq!(normalize_language("subtitulad"), "Subtitulada");
+        assert_eq!(normalize_language("subtitulada"), "Subtitulada");
+        assert_eq!(normalize_language("DOBLADA"), "Doblada");
+        assert_eq!(normalize_language("DOBLADO"), "Doblada");
+        assert_eq!(normalize_language("doblada"), "Doblada");
+        assert_eq!(normalize_language("doblado"), "Doblada");
+    }
+
+    #[test]
+    fn normalize_language_leaves_unknown_labels_trimmed_but_unchanged() {
+        assert_eq!(normalize_language("ESP"), "ESP");
+        assert_eq!(normalize_language("  ESP  "), "ESP");
+        assert_eq!(normalize_language("Castellano"), "Castellano");
+    }
+
+    #[test]
+    fn normalize_language_replaces_empty_with_sin_especificar() {
+        assert_eq!(normalize_language(""), "Sin especificar");
+        assert_eq!(normalize_language("   "), "Sin especificar");
     }
 
     #[tokio::test]
