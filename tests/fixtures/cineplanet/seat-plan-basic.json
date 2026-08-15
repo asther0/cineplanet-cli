@@ -1,0 +1,13 @@
+{
+  "ResponseCode": "0",
+  "ErrorDescription": null,
+  "SeatLayoutData": {
+    "Areas": [{
+      "Number": 1, "Left": 42, "Top": 90, "ColumnCount": 10, "RowCount": 3,
+      "Rows": [{"PhysicalName":"G", "Seats":[
+        {"Id":"7", "Status":0, "Position":{"AreaNumber":1,"RowIndex":0,"ColumnIndex":6}},
+        {"Id":"8", "Status":1, "Position":{"AreaNumber":1,"RowIndex":0,"ColumnIndex":7}}
+      ]}]
+    }]
+  }
+}

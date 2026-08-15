@@ -1,7 +1,10 @@
 pub mod app;
+pub mod cli;
 pub mod demo;
 pub mod domain;
 pub mod live;
 pub mod ranking;
+pub mod recommendation;
 pub mod settings;
 pub mod ui;
+pub mod viewing;

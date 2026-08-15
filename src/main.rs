@@ -1,12 +1,71 @@
 use anyhow::Result;
 use cineplanet_cli::{
     app::{Action, App, Effect, Screen},
-    demo, live, settings, ui,
+    cli::{Cli, Command},
+    demo, live, recommendation, settings, ui,
 };
+use clap::{Parser, error::ErrorKind};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::DefaultTerminal;
+use std::process::ExitCode;
 
-fn main() -> Result<()> {
+fn main() -> ExitCode {
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(error)
+            if matches!(
+                error.kind(),
+                ErrorKind::DisplayHelp | ErrorKind::DisplayVersion
+            ) =>
+        {
+            if let Err(print_error) = error.print() {
+                eprintln!("{print_error}");
+                return ExitCode::FAILURE;
+            }
+            return ExitCode::SUCCESS;
+        }
+        Err(error)
+            if std::env::args_os()
+                .nth(1)
+                .is_some_and(|arg| arg == "recommend") =>
+        {
+            emit_recommend_error(recommendation::failure("arguments", error));
+            return ExitCode::FAILURE;
+        }
+        Err(error) => error.exit(),
+    };
+    match cli.command {
+        Some(Command::Recommend(args)) => match run_recommend(*args) {
+            Ok(response) => match recommendation::to_json(&response) {
+                Ok(json) => {
+                    println!("{json}");
+                    ExitCode::SUCCESS
+                }
+                Err(error) => {
+                    emit_recommend_error(recommendation::failure("serialization", error));
+                    ExitCode::FAILURE
+                }
+            },
+            Err(error) => {
+                emit_recommend_error(error);
+                ExitCode::FAILURE
+            }
+        },
+        Some(Command::Tui) | None => match run_tui() {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("{error:#}");
+                ExitCode::FAILURE
+            }
+        },
+    }
+}
+
+fn emit_recommend_error(error: recommendation::RecommendError) {
+    eprintln!("{}", recommendation::error_json(error));
+}
+
+fn run_tui() -> Result<()> {
     let preferences = settings::load()?;
     let runtime = tokio::runtime::Runtime::new()?;
     let is_demo = std::env::var_os("CINEPLANET_DEMO").is_some();
@@ -22,6 +81,44 @@ fn main() -> Result<()> {
         App::live(catalog, preferences)
     };
     ratatui::run(|terminal| run(terminal, &mut app, client.as_ref(), &runtime))
+}
+
+fn run_recommend(
+    args: cineplanet_cli::cli::RecommendArgs,
+) -> std::result::Result<recommendation::RecommendationResponseV1, recommendation::RecommendError> {
+    let runtime = tokio::runtime::Runtime::new()
+        .map_err(|error| recommendation::failure("runtime", error))?;
+    let is_demo = std::env::var_os("CINEPLANET_DEMO").is_some();
+    let (client, catalog) = if is_demo {
+        (None, demo::catalog())
+    } else {
+        let (client, catalog) = runtime
+            .block_on(live::load_catalog())
+            .map_err(|error| recommendation::failure("catalog", error))?;
+        (Some(client), catalog)
+    };
+    let (query, candidates, preferences) = recommendation::select_candidates(&catalog, &args)?;
+    let candidate_count = candidates.len();
+    let outcome = match client {
+        Some(client) => runtime.block_on(client.hydrate_showtimes(&candidates)),
+        None => recommendation::demo_outcome(candidates),
+    };
+    if candidate_count > 0 && outcome.showtimes.is_empty() && !outcome.failures.is_empty() {
+        let failures = outcome
+            .failures
+            .iter()
+            .map(|failure| format!("{}: {}", failure.showtime_id, failure.message))
+            .collect::<Vec<_>>()
+            .join("; ");
+        return Err(recommendation::failure("hydration", failures));
+    }
+    Ok(recommendation::build_response(
+        query,
+        candidate_count,
+        &preferences,
+        args.limit,
+        outcome,
+    ))
 }
 
 fn run(
@@ -48,17 +145,17 @@ fn run(
             Effect::FetchSeatMaps(_) => {
                 terminal.draw(|frame| ui::render(frame, app))?;
                 let showtimes = app.showtimes_to_hydrate();
-                let hydrated = match client {
+                let outcome = match client {
                     Some(client) => runtime.block_on(client.hydrate_showtimes(&showtimes)),
-                    None => Ok(showtimes),
+                    None => recommendation::demo_outcome(showtimes),
                 };
-                match hydrated {
-                    Ok(showtimes) => app.finish_loading_showtimes(showtimes),
-                    Err(error) => {
-                        app.loading_failed();
-                        eprintln!("No se pudieron actualizar los asientos reales: {error:#}");
-                    }
+                for failure in &outcome.failures {
+                    eprintln!(
+                        "No se pudo actualizar {}: {}",
+                        failure.showtime_id, failure.message
+                    );
                 }
+                app.finish_loading_showtimes(outcome.showtimes);
             }
         }
     }
