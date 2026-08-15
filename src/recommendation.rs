@@ -195,8 +195,7 @@ pub fn select_candidates(
         .filter(|showtime| {
             (args.venues.is_empty()
                 || args.venues.iter().any(|venue| {
-                    venue.eq_ignore_ascii_case(&showtime.venue_id)
-                        || venue.eq_ignore_ascii_case(&showtime.venue_name)
+                    venue_matches(venue, &showtime.venue_id, &showtime.venue_name)
                 }))
                 && matches_any(&args.languages, &showtime.modality.language)
                 && matches_any(&args.formats, &showtime.modality.projection_format)
@@ -213,6 +212,30 @@ fn matches_any(values: &[String], actual: &str) -> bool {
             .iter()
             .any(|value| value.eq_ignore_ascii_case(actual))
 }
+
+fn venue_matches(query: &str, venue_id: &str, venue_name: &str) -> bool {
+    if query.eq_ignore_ascii_case(venue_id) || query.eq_ignore_ascii_case(venue_name) {
+        return true;
+    }
+
+    normalized_venue_alias(query)
+        .zip(normalized_venue_alias(venue_name))
+        .is_some_and(|(query, name)| query == name)
+}
+
+fn normalized_venue_alias(value: &str) -> Option<String> {
+    let normalized = value
+        .chars()
+        .flat_map(char::to_lowercase)
+        .map(|character| if character.is_alphanumeric() { character } else { ' ' })
+        .collect::<String>();
+    let words = normalized
+        .split_whitespace()
+        .skip_while(|word| matches!(*word, "cp" | "cineplanet" | "plaza"))
+        .collect::<Vec<_>>();
+    (!words.is_empty()).then(|| words.join(" "))
+}
+
 fn query(movie_id: String, movie_title: String, args: &RecommendArgs) -> QueryV1 {
     QueryV1 {
         movie_id,
@@ -549,5 +572,17 @@ mod tests {
         assert!(handoff.browser_session_required);
         let json = to_json(&response).unwrap();
         assert!(!json.contains("seat_map"));
+    }
+
+    #[test]
+    fn venue_aliases_match_only_after_normalizing_leading_prefixes() {
+        assert!(venue_matches(
+            "Plaza San Miguel",
+            "san-miguel",
+            "CP San Miguel"
+        ));
+        assert!(venue_matches("Salaverry", "salaverry", "CP Salaverry"));
+        assert!(venue_matches("SAN--MIGUEL", "san-miguel", "CP San Miguel"));
+        assert!(!venue_matches("Miguel", "san-miguel", "CP San Miguel"));
     }
 }
