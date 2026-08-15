@@ -22,48 +22,56 @@ Encuentra funciones de Cineplanet con buenos asientos, sin revisar sede por sede
 
 ## Qué hace
 
-- Recorre la cartelera publicada por Cineplanet.
-- Lista las funciones consultadas con sus asientos disponibles observados.
-- Busca bloques contiguos cerca del centro y la zona media-trasera.
-- Explica por qué recomienda cada función.
-- Mantiene la compra y la reserva en la web de Cineplanet.
+- Consulta en vivo y de forma anónima la cartelera y los mapas de asientos públicos de Cineplanet.
+- Guía la selección de ciudad, película, fecha, sede y grupo de 1-5 personas.
+- Ordena las funciones cronológicamente e indica hora, asientos disponibles, sede y modalidad.
+- Analiza cada función y etiqueta el ajuste para el grupo y la zona de visualización.
+- Muestra un mapa de sala fiel a la distribución real y sus asientos observados.
+- Recomienda el mejor bloque contiguo en la zona media o media-trasera, cerca del centro.
+- Conserva las sedes favoritas como preferencias locales para la lógica de recomendaciones.
+- Cuando el bloque cruza un pasillo, ofrece la alternativa disponible y explica la separación.
+- La compra y la reserva siguen ocurriendo fuera de la CLI, en Cineplanet.
 
 ## Flujo
 
 ```text
-Película → fecha(s) → sede(s) → grupo (1–5) → confirmar búsqueda → funciones → mapa
+Ciudad → película → fecha(s) → sede(s) → grupo (1-5) → funciones → mapa
 ```
 
-La experiencia será una TUI navegable con flechas, Enter, Escape y selectores múltiples. No requerirá memorizar comandos.
+La TUI funciona con flechas, Enter, Escape y selectores múltiples. No requiere memorizar comandos.
 
-## Estado
+## Roadmap
 
-En desarrollo temprano.
+1. Modos de decisión: Mejor vista, Más pronto y Todos juntos.
+2. Revalidación de asientos antes de la entrega y opción de abrir o copiar el enlace de Cineplanet.
+3. Filtros por horario y modalidad.
+4. Agrupación de estrenos.
+5. Monitoreo técnico del contrato público de Cineplanet.
 
-- [x] Dominio de funciones, preferencias y mapas de sala
-- [x] Primer ranking de bloques contiguos
-- [x] Preferencias persistentes y onboarding de sedes
-- [x] Adaptador HTTP público de Cineplanet: cartelera, sedes, funciones y mapas
-- [x] Flujo TUI interactivo con pantalla de bienvenida
-- [x] Selección guiada de fechas, sedes y grupo antes de consultar asientos
-- [x] Alternativas con asientos disponibles cuando no hay bloque contiguo
-- [ ] Filtros de horario y modalidad
-- [ ] Revalidación y entrega a Cineplanet
+El runtime es determinista: no usa LLM ni navegador oculto durante el uso normal.
+Al iniciar crea una sesión anónima efímera y la reutiliza durante esa ejecución. Si el contrato público cambia, la aplicación falla de forma explícita y nunca sustituye datos reales por demo. El demo solo se habilita explícitamente con `CINEPLANET_DEMO=1`.
 
-El runtime será determinista: sin LLM y sin navegador oculto durante el uso normal.
-Al iniciar, consulta el contrato público de Cineplanet con una sesión anónima efímera.
-Si el contrato cambia, falla de forma explícita; nunca sustituye datos reales por demo.
-El demo solo se habilita explícitamente con `CINEPLANET_DEMO=1`.
+## Instalación en macOS
 
-## Inicio
+Instala las Herramientas de línea de comandos de Xcode y Rust estable. Luego, desde un clon del repositorio:
 
-Tras instalar el binario, lanza la aplicación interactiva con un solo comando:
+```bash
+xcode-select --install
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+git clone https://github.com/asther0/cineplanet-cli.git
+cd cineplanet-cli
+cargo install --path .
+```
+
+Si `cargo` no está disponible tras instalar Rust, cierra y vuelve a abrir la terminal.
+
+Luego inicia la aplicación con:
 
 ```bash
 cineplanet-cli
 ```
 
-La TUI responde al teclado:
+Controles de la TUI:
 
 - Flechas: moverte entre opciones.
 - Enter: seleccionar o continuar.
@@ -71,4 +79,4 @@ La TUI responde al teclado:
 - Esc: volver al paso anterior.
 - Q: salir.
 
-El MVP tendrá soporte verificado en macOS.
+macOS es la plataforma actualmente verificada.
