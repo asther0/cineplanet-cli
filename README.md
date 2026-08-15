@@ -56,13 +56,11 @@ consultar Cineplanet sin instalar el CLI:
 
 | Proyecto | Repositorio | Demo |
 | --- | --- | --- |
-| **cineplanet-api**, creado por [gersonsebastianx](https://github.com/gersonsebastianx) a partir de este recurso: API documentada por ingeniería inversa, cliente Node.js sin dependencias e interfaz web conversacional para consultar cartelera, funciones y mapas de butacas. | [GitHub](https://github.com/gersonsebastianx/cineplanet-api) | [cineplanet-api.vercel.app](https://cineplanet-api.vercel.app) |
+| **cineplanet-api**, de [gersonsebastianx](https://github.com/gersonsebastianx): experiencia web conversacional con IA para consultar funciones y encontrar entradas de Cineplanet. | [GitHub](https://github.com/gersonsebastianx/cineplanet-api) | [cineplanet-api.vercel.app](https://cineplanet-api.vercel.app) |
 
-Gracias a gersonsebastianx por aprovechar este recurso y convertirlo en una
-API y experiencia web compartible. El CLI prioriza la comparación, el ranking
-de visión y el uso desde agentes; `cineplanet-api` expone la fuente de datos
-como API y web conversacional. No es una API oficial de Cineplanet: sus
-endpoints públicos pueden cambiar o quedar temporalmente fuera de servicio.
+`cineplanet-api` convierte esta integración en una experiencia web compartible
+para buscar entradas conversando con IA. No es una API oficial de Cineplanet:
+sus endpoints públicos pueden cambiar o quedar temporalmente fuera de servicio.
 
 ## Flujo
 
