@@ -50,6 +50,11 @@ pub struct App {
     venue_index: usize,
     movie_index: usize,
     query: String,
+    city_query: String,
+    venue_query: String,
+    date_query: String,
+    venue_filter_query: String,
+    result_query: String,
     selected_movie_id: Option<String>,
     recommendations: Vec<Recommendation>,
     result_showtimes: Vec<crate::domain::Showtime>,
@@ -86,6 +91,11 @@ impl App {
             venue_index: 0,
             movie_index: 0,
             query: String::new(),
+            city_query: String::new(),
+            venue_query: String::new(),
+            date_query: String::new(),
+            venue_filter_query: String::new(),
+            result_query: String::new(),
             selected_movie_id: None,
             recommendations: Vec::new(),
             result_showtimes: Vec::new(),
@@ -139,6 +149,26 @@ impl App {
         &self.query
     }
 
+    pub fn city_query(&self) -> &str {
+        &self.city_query
+    }
+
+    pub fn venue_query(&self) -> &str {
+        &self.venue_query
+    }
+
+    pub fn date_query(&self) -> &str {
+        &self.date_query
+    }
+
+    pub fn venue_filter_query(&self) -> &str {
+        &self.venue_filter_query
+    }
+
+    pub fn result_query(&self) -> &str {
+        &self.result_query
+    }
+
     pub fn city_index(&self) -> usize {
         self.city_index
     }
@@ -184,11 +214,11 @@ impl App {
     }
 
     pub fn date_filter_on_continue(&self) -> bool {
-        self.date_filter_index == self.filter_dates.len()
+        self.date_filter_index == self.visible_filter_dates().len()
     }
 
     pub fn venue_filter_on_continue(&self) -> bool {
-        self.venue_filter_index == self.filter_venues.len()
+        self.venue_filter_index == self.visible_filter_venues().len()
     }
 
     pub fn party_size_on_continue(&self) -> bool {
@@ -227,11 +257,13 @@ impl App {
     }
 
     pub fn available_cities(&self) -> Vec<&str> {
+        let query = self.city_query.to_lowercase();
         let mut cities: Vec<&str> = self
             .catalog
             .venues
             .iter()
             .map(|venue| venue.city.as_str())
+            .filter(|city| query.is_empty() || city.to_lowercase().contains(&query))
             .collect::<std::collections::BTreeSet<_>>()
             .into_iter()
             .collect();
@@ -252,10 +284,69 @@ impl App {
         let Some(city) = self.preferences.city.as_deref() else {
             return Vec::new();
         };
+        let query = self.venue_query.to_lowercase();
         self.catalog
             .venues
             .iter()
-            .filter(|venue| venue.city == city)
+            .filter(|venue| {
+                venue.city == city
+                    && (query.is_empty()
+                        || venue.name.to_lowercase().contains(&query)
+                        || venue.id.to_lowercase().contains(&query))
+            })
+            .collect()
+    }
+
+    pub fn visible_filter_dates(&self) -> Vec<&String> {
+        let query = self.date_query.to_lowercase();
+        self.filter_dates
+            .iter()
+            .filter(|date| {
+                query.is_empty()
+                    || date.to_lowercase().contains(&query)
+                    || chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
+                        .is_ok_and(|parsed| parsed.format("%d/%m/%Y").to_string().contains(&query))
+            })
+            .collect()
+    }
+
+    pub fn visible_filter_venues(&self) -> Vec<&String> {
+        let query = self.venue_filter_query.to_lowercase();
+        self.filter_venues
+            .iter()
+            .filter(|venue_id| {
+                query.is_empty()
+                    || venue_id.to_lowercase().contains(&query)
+                    || self
+                        .catalog
+                        .venues
+                        .iter()
+                        .find(|venue| venue.id == **venue_id)
+                        .is_some_and(|venue| venue.name.to_lowercase().contains(&query))
+            })
+            .collect()
+    }
+
+    pub fn visible_result_showtimes(&self) -> Vec<&crate::domain::Showtime> {
+        let query = self.result_query.to_lowercase();
+        self.result_showtimes
+            .iter()
+            .filter(|showtime| {
+                query.is_empty()
+                    || showtime.venue_name.to_lowercase().contains(&query)
+                    || showtime.modality.language.to_lowercase().contains(&query)
+                    || showtime.modality.room_type.to_lowercase().contains(&query)
+                    || showtime
+                        .modality
+                        .projection_format
+                        .to_lowercase()
+                        .contains(&query)
+                    || showtime
+                        .starts_at
+                        .format("%H:%M")
+                        .to_string()
+                        .contains(&query)
+            })
             .collect()
     }
 
@@ -275,7 +366,7 @@ impl App {
     pub fn current_result_showtime(&self) -> Option<&crate::domain::Showtime> {
         self.result_index
             .checked_sub(1)
-            .and_then(|index| self.result_showtimes.get(index))
+            .and_then(|index| self.visible_result_showtimes().get(index).copied())
     }
 
     pub fn available_seat_count(&self, showtime: &crate::domain::Showtime) -> usize {
@@ -337,6 +428,8 @@ impl App {
         self.filter_venues = venues.into_iter().collect();
         self.selected_filter_dates.clear();
         self.selected_filter_venues.clear();
+        self.date_query.clear();
+        self.venue_filter_query.clear();
         self.date_filter_index = 0;
         self.venue_filter_index = 0;
     }
@@ -382,6 +475,7 @@ impl App {
                 .cmp(&right.starts_at)
                 .then_with(|| left.venue_name.cmp(&right.venue_name))
         });
+        self.result_query.clear();
         self.result_index = 0;
         self.screen = Screen::Results;
     }
@@ -405,13 +499,22 @@ impl App {
                         .position(|city| Some(*city) == self.preferences.city.as_deref())
                         .unwrap_or(0);
                     Screen::CitySetup
-                } else if !self.preferences.onboarding_complete {
-                    self.venue_index = 0;
-                    self.venue_setup_caller = Screen::CitySetup;
-                    Screen::VenueSetup
                 } else {
+                    if !self.preferences.onboarding_complete {
+                        self.preferences.onboarding_complete = true;
+                        self.screen = Screen::Movies;
+                        return Ok(Effect::SavePreferences);
+                    }
                     Screen::Movies
                 };
+            }
+            (Screen::CitySetup, Action::Character(character)) => {
+                self.city_query.push(character);
+                self.city_index = 0;
+            }
+            (Screen::CitySetup, Action::Backspace) => {
+                self.city_query.pop();
+                self.city_index = 0;
             }
             (Screen::CitySetup, Action::Up) => {
                 let count = self.available_cities().len().saturating_add(1);
@@ -428,21 +531,28 @@ impl App {
             (Screen::CitySetup, Action::Confirm) => {
                 if let Some(city) = self.available_cities().get(self.city_index).copied() {
                     self.preferences.city = Some(city.to_string());
+                    self.preferences.onboarding_complete = true;
+                    self.venue_query.clear();
                     self.venue_index = 0;
+                    self.screen = Screen::Movies;
                     return Ok(Effect::SavePreferences);
                 }
-                if self.city_setup_on_continue() {
-                    self.screen = if self.preferences.onboarding_complete {
-                        Screen::Movies
-                    } else {
-                        self.venue_setup_caller = Screen::CitySetup;
-                        Screen::VenueSetup
-                    };
+                if self.city_setup_on_continue() && self.saved_city_available() {
+                    self.preferences.onboarding_complete = true;
+                    self.screen = Screen::Movies;
                     return Ok(Effect::SavePreferences);
                 }
             }
             (Screen::CitySetup, Action::Back) => {
                 self.screen = Screen::Welcome;
+            }
+            (Screen::VenueSetup, Action::Character(character)) => {
+                self.venue_query.push(character);
+                self.venue_index = 0;
+            }
+            (Screen::VenueSetup, Action::Backspace) => {
+                self.venue_query.pop();
+                self.venue_index = 0;
             }
             (Screen::VenueSetup, Action::Up) => {
                 let count = self.visible_venues().len().saturating_add(1);
@@ -472,10 +582,11 @@ impl App {
                     .get(self.venue_index)
                     .map(|venue| venue.id.clone())
                 {
-                    if !self.preferences.favorite_venue_ids.remove(&venue_id) {
-                        self.preferences.favorite_venue_ids.insert(venue_id);
-                    }
-                    return Ok(Effect::None);
+                    self.preferences.favorite_venue_ids.insert(venue_id);
+                    self.preferences.onboarding_complete = true;
+                    self.venue_query.clear();
+                    self.screen = Screen::Movies;
+                    return Ok(Effect::SavePreferences);
                 }
                 if self.venue_setup_on_continue() {
                     self.preferences.onboarding_complete = true;
@@ -524,14 +635,22 @@ impl App {
                 self.venue_setup_caller = Screen::Movies;
                 self.screen = Screen::VenueSetup;
             }
+            (Screen::Results, Action::Character(character)) => {
+                self.result_query.push(character);
+                self.result_index = 0;
+            }
+            (Screen::Results, Action::Backspace) => {
+                self.result_query.pop();
+                self.result_index = 0;
+            }
             (Screen::Results, Action::Up) => {
-                let count = self.result_showtimes.len() + 1;
+                let count = self.visible_result_showtimes().len() + 1;
                 if count > 0 {
                     self.result_index = self.result_index.checked_sub(1).unwrap_or(count - 1);
                 }
             }
             (Screen::Results, Action::Down) => {
-                let count = self.result_showtimes.len() + 1;
+                let count = self.visible_result_showtimes().len() + 1;
                 if count > 0 {
                     self.result_index = (self.result_index + 1) % count;
                 }
@@ -553,24 +672,35 @@ impl App {
                 self.venue_setup_caller = Screen::Results;
                 self.screen = Screen::VenueSetup;
             }
+            (Screen::DateFilter, Action::Character(character)) => {
+                self.date_query.push(character);
+                self.date_filter_index = 0;
+            }
+            (Screen::DateFilter, Action::Backspace) => {
+                self.date_query.pop();
+                self.date_filter_index = 0;
+            }
             (Screen::DateFilter, Action::Up) => {
-                let count = self.filter_dates.len() + 1;
+                let count = self.visible_filter_dates().len() + 1;
                 if count > 0 {
                     self.date_filter_index =
                         self.date_filter_index.checked_sub(1).unwrap_or(count - 1);
                 }
             }
             (Screen::DateFilter, Action::Down) => {
-                let count = self.filter_dates.len() + 1;
+                let count = self.visible_filter_dates().len() + 1;
                 if count > 0 {
                     self.date_filter_index = (self.date_filter_index + 1) % count;
                 }
             }
             (Screen::DateFilter, Action::Toggle) => {
-                if let Some(date) = self.filter_dates.get(self.date_filter_index)
-                    && !self.selected_filter_dates.remove(date)
+                if let Some(date) = self
+                    .visible_filter_dates()
+                    .get(self.date_filter_index)
+                    .map(|date| (*date).clone())
+                    && !self.selected_filter_dates.remove(&date)
                 {
-                    self.selected_filter_dates.insert(date.clone());
+                    self.selected_filter_dates.insert(date);
                 }
             }
             (Screen::DateFilter, Action::Confirm) => {
@@ -579,33 +709,48 @@ impl App {
                         self.venue_filter_index = 0;
                         self.screen = Screen::VenueFilter;
                     }
-                } else if let Some(date) = self.filter_dates.get(self.date_filter_index)
-                    && !self.selected_filter_dates.remove(date)
+                } else if let Some(date) = self
+                    .visible_filter_dates()
+                    .get(self.date_filter_index)
+                    .map(|date| (*date).clone())
                 {
-                    self.selected_filter_dates.insert(date.clone());
+                    self.selected_filter_dates.insert(date);
+                    self.venue_filter_index = 0;
+                    self.screen = Screen::VenueFilter;
                 }
             }
             (Screen::DateFilter, Action::Back) => {
                 self.screen = Screen::Movies;
             }
+            (Screen::VenueFilter, Action::Character(character)) => {
+                self.venue_filter_query.push(character);
+                self.venue_filter_index = 0;
+            }
+            (Screen::VenueFilter, Action::Backspace) => {
+                self.venue_filter_query.pop();
+                self.venue_filter_index = 0;
+            }
             (Screen::VenueFilter, Action::Up) => {
-                let count = self.filter_venues.len() + 1;
+                let count = self.visible_filter_venues().len() + 1;
                 if count > 0 {
                     self.venue_filter_index =
                         self.venue_filter_index.checked_sub(1).unwrap_or(count - 1);
                 }
             }
             (Screen::VenueFilter, Action::Down) => {
-                let count = self.filter_venues.len() + 1;
+                let count = self.visible_filter_venues().len() + 1;
                 if count > 0 {
                     self.venue_filter_index = (self.venue_filter_index + 1) % count;
                 }
             }
             (Screen::VenueFilter, Action::Toggle) => {
-                if let Some(venue) = self.filter_venues.get(self.venue_filter_index)
-                    && !self.selected_filter_venues.remove(venue)
+                if let Some(venue) = self
+                    .visible_filter_venues()
+                    .get(self.venue_filter_index)
+                    .map(|venue| (*venue).clone())
+                    && !self.selected_filter_venues.remove(&venue)
                 {
-                    self.selected_filter_venues.insert(venue.clone());
+                    self.selected_filter_venues.insert(venue);
                 }
             }
             (Screen::VenueFilter, Action::Confirm) => {
@@ -614,10 +759,14 @@ impl App {
                         self.party_size_index = self.preferences.party_size.clamp(1, 5) - 1;
                         self.screen = Screen::PartySize;
                     }
-                } else if let Some(venue) = self.filter_venues.get(self.venue_filter_index)
-                    && !self.selected_filter_venues.remove(venue)
+                } else if let Some(venue) = self
+                    .visible_filter_venues()
+                    .get(self.venue_filter_index)
+                    .map(|venue| (*venue).clone())
                 {
-                    self.selected_filter_venues.insert(venue.clone());
+                    self.selected_filter_venues.insert(venue);
+                    self.party_size_index = self.preferences.party_size.clamp(1, 5) - 1;
+                    self.screen = Screen::PartySize;
                 }
             }
             (Screen::VenueFilter, Action::Back) => {
@@ -635,6 +784,8 @@ impl App {
                     return Ok(Effect::SavePreferences);
                 }
                 self.preferences.party_size = self.party_size_index + 1;
+                self.screen = Screen::SearchSummary;
+                return Ok(Effect::SavePreferences);
             }
             (Screen::PartySize, Action::Back) => {
                 self.screen = Screen::VenueFilter;
@@ -738,18 +889,33 @@ mod tests {
     }
 
     #[test]
-    fn first_run_requires_selecting_a_city_before_venues() {
+    fn first_run_continues_from_city_to_movies() {
         let mut app = App::new(demo::catalog(), Preferences::default());
 
         assert_eq!(app.screen(), Screen::Welcome);
         app.apply(Action::Confirm).unwrap();
         assert_eq!(app.screen(), Screen::CitySetup);
         app.apply(Action::Confirm).unwrap();
-        assert_eq!(app.screen(), Screen::CitySetup);
         assert_eq!(app.preferences().city.as_deref(), Some("Lima"));
-        app.apply(Action::Down).unwrap();
+        assert_eq!(app.screen(), Screen::Movies);
+    }
+
+    #[test]
+    fn first_run_asks_for_cinemas_only_after_selecting_a_date() {
+        let mut app = App::new(demo::catalog(), Preferences::default());
+
         app.apply(Action::Confirm).unwrap();
-        assert_eq!(app.screen(), Screen::VenueSetup);
+        app.apply(Action::Confirm).unwrap();
+        assert_eq!(app.screen(), Screen::Movies);
+
+        app.apply(Action::Confirm).unwrap();
+        assert_eq!(app.screen(), Screen::DateFilter);
+        app.apply(Action::Confirm).unwrap();
+        assert_eq!(app.screen(), Screen::VenueFilter);
+        app.apply(Action::Confirm).unwrap();
+        assert_eq!(app.screen(), Screen::PartySize);
+        app.apply(Action::Confirm).unwrap();
+        assert_eq!(app.screen(), Screen::SearchSummary);
     }
 
     #[test]
@@ -788,26 +954,21 @@ mod tests {
 
         app.apply(Action::Confirm).unwrap();
         assert_eq!(app.preferences().city.as_deref(), Some("Arequipa"));
-        assert_eq!(app.screen(), Screen::CitySetup);
+        assert_eq!(app.screen(), Screen::Movies);
     }
 
     #[test]
-    fn first_run_allows_selecting_multiple_favorite_venues() {
+    fn favorite_venue_editor_allows_selecting_multiple_venues() {
         let mut app = App::new(demo::catalog(), Preferences::default());
 
         assert_eq!(app.screen(), Screen::Welcome);
         app.apply(Action::Confirm).unwrap();
         assert_eq!(app.screen(), Screen::CitySetup);
         app.apply(Action::Confirm).unwrap();
-        assert_eq!(app.screen(), Screen::CitySetup);
-        app.apply(Action::Down).unwrap();
-        app.apply(Action::Confirm).unwrap();
+        assert_eq!(app.screen(), Screen::Movies);
+        app.apply(Action::EditVenues).unwrap();
         assert_eq!(app.screen(), Screen::VenueSetup);
         app.apply(Action::Toggle).unwrap();
-        app.apply(Action::Down).unwrap();
-        app.apply(Action::Toggle).unwrap();
-        app.apply(Action::Down).unwrap();
-        app.apply(Action::Down).unwrap();
         app.apply(Action::Down).unwrap();
         let effect = app.apply(Action::Confirm).unwrap();
 
@@ -910,6 +1071,86 @@ mod tests {
     }
 
     #[test]
+    fn typing_filters_cities_and_favorite_venues() {
+        let mut app = App::new(catalog_with_two_cities(), Preferences::default());
+        app.apply(Action::Confirm).unwrap();
+
+        for character in "areq".chars() {
+            app.apply(Action::Character(character)).unwrap();
+        }
+        assert_eq!(app.available_cities(), vec!["Arequipa"]);
+        app.apply(Action::Confirm).unwrap();
+        assert_eq!(app.preferences().city.as_deref(), Some("Arequipa"));
+        assert_eq!(app.screen(), Screen::Movies);
+        app.apply(Action::EditVenues).unwrap();
+        assert_eq!(app.screen(), Screen::VenueSetup);
+
+        for character in "center".chars() {
+            app.apply(Action::Character(character)).unwrap();
+        }
+        assert_eq!(app.visible_venues().len(), 1);
+        assert_eq!(app.visible_venues()[0].id, "arequipa-center");
+    }
+
+    #[test]
+    fn typing_filters_dates_and_venues_without_losing_selected_values() {
+        let preferences = Preferences {
+            onboarding_complete: true,
+            ..preferences_with_city("Lima")
+        };
+        let mut app = App::new(demo::catalog(), preferences);
+        app.apply(Action::Confirm).unwrap();
+        app.apply(Action::Confirm).unwrap();
+
+        let date = app.filter_dates()[0].clone();
+        for character in date.chars().take(4) {
+            app.apply(Action::Character(character)).unwrap();
+        }
+        assert!(app.visible_filter_dates().contains(&&date));
+        app.apply(Action::Confirm).unwrap();
+        assert!(app.selected_filter_dates().contains(&date));
+        assert_eq!(app.screen(), Screen::VenueFilter);
+
+        for character in "molina".chars() {
+            app.apply(Action::Character(character)).unwrap();
+        }
+        assert_eq!(
+            app.visible_filter_venues()
+                .into_iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            vec!["la-molina"]
+        );
+        app.apply(Action::Toggle).unwrap();
+        assert!(app.selected_filter_venues().contains("la-molina"));
+    }
+
+    #[test]
+    fn typing_filters_results_by_venue_and_modality() {
+        let preferences = Preferences {
+            onboarding_complete: true,
+            ..preferences_with_city("Lima")
+        };
+        let mut app = App::new(demo::catalog(), preferences);
+        app.apply(Action::Confirm).unwrap();
+        app.apply(Action::Confirm).unwrap();
+        app.selected_filter_dates = app.filter_dates.iter().cloned().collect();
+        app.selected_filter_venues = app.filter_venues.iter().cloned().collect();
+        app.finish_loading_showtimes(app.showtimes_to_hydrate());
+
+        for character in "prime".chars() {
+            app.apply(Action::Character(character)).unwrap();
+        }
+
+        assert!(!app.visible_result_showtimes().is_empty());
+        assert!(
+            app.visible_result_showtimes()
+                .iter()
+                .all(|showtime| { showtime.modality.room_type.eq_ignore_ascii_case("prime") })
+        );
+    }
+
+    #[test]
     fn welcome_is_the_initial_screen_on_first_run() {
         let app = App::new(demo::catalog(), Preferences::default());
         assert_eq!(app.screen(), Screen::Welcome);
@@ -938,12 +1179,14 @@ mod tests {
     }
 
     #[test]
-    fn welcome_confirm_transitions_to_venue_setup_when_city_is_saved() {
+    fn welcome_confirm_skips_venue_setup_when_city_is_saved() {
         let mut app = App::new(demo::catalog(), preferences_with_city("Lima"));
 
-        app.apply(Action::Confirm).unwrap();
+        let effect = app.apply(Action::Confirm).unwrap();
 
-        assert_eq!(app.screen(), Screen::VenueSetup);
+        assert_eq!(effect, Effect::SavePreferences);
+        assert!(app.preferences().onboarding_complete);
+        assert_eq!(app.screen(), Screen::Movies);
     }
 
     #[test]
@@ -1030,23 +1273,16 @@ mod tests {
     }
 
     #[test]
-    fn city_setup_has_continue_button_and_enter_selects_without_advancing() {
+    fn city_setup_enter_selects_and_advances() {
         let mut app = App::new(demo::catalog(), Preferences::default());
         app.apply(Action::Confirm).unwrap();
         assert_eq!(app.screen(), Screen::CitySetup);
 
-        // Confirm on city selects it but stays
-        app.apply(Action::Confirm).unwrap();
-        assert_eq!(app.screen(), Screen::CitySetup);
+        let effect = app.apply(Action::Confirm).unwrap();
+
+        assert_eq!(effect, Effect::SavePreferences);
         assert_eq!(app.preferences().city.as_deref(), Some("Lima"));
-
-        // Down moves to Continue button
-        app.apply(Action::Down).unwrap();
-        assert!(app.city_setup_on_continue());
-
-        // Confirm on Continue advances
-        app.apply(Action::Confirm).unwrap();
-        assert_eq!(app.screen(), Screen::VenueSetup);
+        assert_eq!(app.screen(), Screen::Movies);
     }
 
     #[test]
@@ -1059,44 +1295,24 @@ mod tests {
     }
 
     #[test]
-    fn venue_setup_enter_toggles_venue_but_stays_enter_on_continue_advances() {
+    fn venue_setup_space_marks_more_and_enter_selects_and_advances() {
         let mut app = App::new(demo::catalog(), Preferences::default());
         app.apply(Action::Confirm).unwrap();
         app.apply(Action::Confirm).unwrap();
-        app.apply(Action::Down).unwrap();
-        app.apply(Action::Confirm).unwrap();
+        app.apply(Action::EditVenues).unwrap();
         assert_eq!(app.screen(), Screen::VenueSetup);
 
-        // Enter on first venue toggles it
-        app.apply(Action::Confirm).unwrap();
+        app.apply(Action::Toggle).unwrap();
         assert_eq!(app.preferences().favorite_venue_ids.len(), 1);
         assert_eq!(app.screen(), Screen::VenueSetup);
 
-        // Space on second venue toggles it
         app.apply(Action::Down).unwrap();
-        app.apply(Action::Toggle).unwrap();
-        assert_eq!(app.preferences().favorite_venue_ids.len(), 2);
-        assert_eq!(app.screen(), Screen::VenueSetup);
-
-        // Navigate to Continue and confirm
-        for _ in 0..3 {
-            app.apply(Action::Down).unwrap();
-        }
-        assert!(app.venue_setup_on_continue());
         let effect = app.apply(Action::Confirm).unwrap();
+
         assert_eq!(effect, Effect::SavePreferences);
+        assert_eq!(app.preferences().favorite_venue_ids.len(), 2);
         assert_eq!(app.screen(), Screen::Movies);
         assert!(app.preferences().onboarding_complete);
-    }
-
-    #[test]
-    fn venue_setup_esc_returns_to_caller_during_onboarding() {
-        let mut app = App::new(demo::catalog(), preferences_with_city("Lima"));
-        app.apply(Action::Confirm).unwrap();
-        assert_eq!(app.screen(), Screen::VenueSetup);
-        assert_eq!(app.venue_setup_caller, Screen::CitySetup);
-        app.apply(Action::Back).unwrap();
-        assert_eq!(app.screen(), Screen::CitySetup);
     }
 
     #[test]
@@ -1213,13 +1429,10 @@ mod tests {
         assert_eq!(app.screen(), Screen::PartySize);
 
         app.party_size_index = 3;
-        app.apply(Action::Confirm).unwrap();
-        assert_eq!(app.preferences().party_size, 4);
-        assert_eq!(app.screen(), Screen::PartySize);
-
-        app.party_size_index = 5;
         let effect = app.apply(Action::Confirm).unwrap();
+
         assert_eq!(effect, Effect::SavePreferences);
+        assert_eq!(app.preferences().party_size, 4);
         assert_eq!(app.screen(), Screen::SearchSummary);
     }
 

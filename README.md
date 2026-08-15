@@ -38,7 +38,7 @@ Encuentra funciones de Cineplanet con buenos asientos, sin revisar sede por sede
 Ciudad → película → fecha(s) → sede(s) → grupo (1-5) → funciones → mapa
 ```
 
-La TUI funciona con flechas, Enter, Escape y selectores múltiples. No requiere memorizar comandos.
+La TUI permite escribir para filtrar ciudades, películas, fechas, sedes y funciones al instante. También funciona con flechas, Enter, Escape y selectores múltiples; no requiere memorizar comandos.
 
 ## Roadmap
 
@@ -74,6 +74,8 @@ cineplanet-cli
 Controles de la TUI:
 
 - Flechas: moverte entre opciones.
+- Escribir: filtrar al instante la lista visible.
+- Backspace: borrar caracteres del filtro.
 - Enter: seleccionar o continuar.
 - Space: alternar selección en los selectores múltiples.
 - Esc: volver al paso anterior.

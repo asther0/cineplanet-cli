@@ -161,6 +161,7 @@ fn welcome_brand() -> Vec<Line<'static>> {
 }
 
 fn render_venues(frame: &mut Frame<'_>, area: Rect, app: &App) {
+    let area = render_query(frame, area, app.venue_query(), " Buscar sede ");
     let mut items: Vec<_> = app
         .visible_venues()
         .into_iter()
@@ -203,6 +204,7 @@ fn render_venues(frame: &mut Frame<'_>, area: Rect, app: &App) {
 }
 
 fn render_city_setup(frame: &mut Frame<'_>, area: Rect, app: &App) {
+    let area = render_query(frame, area, app.city_query(), " Buscar ciudad ");
     let mut items: Vec<_> = app
         .available_cities()
         .into_iter()
@@ -249,16 +251,7 @@ fn render_city_setup(frame: &mut Frame<'_>, area: Rect, app: &App) {
 }
 
 fn render_movies(frame: &mut Frame<'_>, area: Rect, app: &App) {
-    let [search, list_area] =
-        Layout::vertical([Constraint::Length(3), Constraint::Min(4)]).areas(area);
-    frame.render_widget(
-        Paragraph::new(format!("{}▌", app.query())).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(" Buscar película "),
-        ),
-        search,
-    );
+    let list_area = render_query(frame, area, app.query(), " Buscar película ");
 
     let movies = app.visible_movies();
     let items: Vec<_> = movies
@@ -298,6 +291,7 @@ fn render_movies(frame: &mut Frame<'_>, area: Rect, app: &App) {
 }
 
 fn render_results(frame: &mut Frame<'_>, area: Rect, app: &App) {
+    let area = render_query(frame, area, app.result_query(), " Buscar función ");
     let title = if app.filters_active() {
         format!(
             " Funciones disponibles ({} fechas, {} sedes) ",
@@ -318,7 +312,8 @@ fn render_results(frame: &mut Frame<'_>, area: Rect, app: &App) {
             Style::default().fg(MUTED),
         )),
     ])];
-    items.extend(app.result_showtimes().iter().map(|showtime| {
+    let visible_showtimes = app.visible_result_showtimes();
+    items.extend(visible_showtimes.iter().map(|showtime| {
         let available = app.available_seat_count(showtime);
         let (availability, availability_style) = if showtime.seat_map.seats.is_empty() {
             (
@@ -381,8 +376,8 @@ fn render_results(frame: &mut Frame<'_>, area: Rect, app: &App) {
             ),
         ])
     }));
-    if app.result_showtimes().is_empty() {
-        items.push(ListItem::new("No hay funciones para esta combinación."));
+    if visible_showtimes.is_empty() {
+        items.push(ListItem::new("No hay funciones que coincidan."));
     }
     let mut state = ListState::default().with_selected(Some(app.result_index()));
     let list = List::new(items)
@@ -444,8 +439,9 @@ fn result_status_tags(app: &App, showtime: &crate::domain::Showtime) -> Vec<Span
 }
 
 fn render_date_filter(frame: &mut Frame<'_>, area: Rect, app: &App) {
+    let area = render_query(frame, area, app.date_query(), " Buscar fecha ");
     let mut items = Vec::new();
-    for date in app.filter_dates() {
+    for date in app.visible_filter_dates() {
         let checked = app.selected_filter_dates().contains(date);
         let label = if let Ok(parsed) = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d") {
             parsed.format("%d/%m/%Y").to_string()
@@ -493,8 +489,9 @@ fn render_date_filter(frame: &mut Frame<'_>, area: Rect, app: &App) {
 }
 
 fn render_venue_filter(frame: &mut Frame<'_>, area: Rect, app: &App) {
+    let area = render_query(frame, area, app.venue_filter_query(), " Buscar sede ");
     let mut items = Vec::new();
-    for venue_id in app.filter_venues() {
+    for venue_id in app.visible_filter_venues() {
         let checked = app.selected_filter_venues().contains(venue_id);
         let venue_name = app
             .catalog()
@@ -542,6 +539,16 @@ fn render_venue_filter(frame: &mut Frame<'_>, area: Rect, app: &App) {
         )
         .highlight_symbol("› ");
     frame.render_stateful_widget(list, area, &mut state);
+}
+
+fn render_query(frame: &mut Frame<'_>, area: Rect, query: &str, title: &str) -> Rect {
+    let [search, list] = Layout::vertical([Constraint::Length(3), Constraint::Min(4)]).areas(area);
+    frame.render_widget(
+        Paragraph::new(format!("{query}▌"))
+            .block(Block::default().borders(Borders::ALL).title(title)),
+        search,
+    );
+    list
 }
 
 fn render_party_size(frame: &mut Frame<'_>, area: Rect, app: &App) {
@@ -738,21 +745,21 @@ fn render_seat_map(frame: &mut Frame<'_>, area: Rect, app: &App) {
 fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App) {
     let help = match app.screen() {
         Screen::Welcome => "Enter comenzar · Q / Ctrl-C salir",
-        Screen::CitySetup => "↑↓ mover · Enter elegir ciudad · Q salir",
-        Screen::VenueSetup => "↑↓ mover · Espacio marcar · Enter guardar · Q salir",
+        Screen::CitySetup => "Escribe para filtrar · ↑↓ mover · Enter elegir · Q salir",
+        Screen::VenueSetup => "Escribe para filtrar · ↑↓ mover · Espacio marcar · Enter elegir",
         Screen::Movies => {
             "Escribe para filtrar · ↑↓ mover · Enter elegir película · Esc sedes · Q salir"
         }
         Screen::DateFilter => {
-            "↑↓ mover · Espacio/Enter marcar · baja a Continuar · Esc volver · Q salir"
+            "Escribe para filtrar · ↑↓ mover · Espacio marcar · Enter elegir · Esc volver"
         }
         Screen::VenueFilter => {
-            "↑↓ mover · Espacio/Enter marcar · baja a Continuar · Esc volver · Q salir"
+            "Escribe para filtrar · ↑↓ mover · Espacio marcar · Enter elegir · Esc volver"
         }
-        Screen::PartySize => "↑↓ mover · Enter elegir · baja a Continuar · Esc volver · Q salir",
+        Screen::PartySize => "↑↓ mover · Enter elegir y continuar · Esc volver · Q salir",
         Screen::SearchSummary => "Enter buscar funciones · Esc volver · Q salir",
         Screen::Loading => "Actualizando disponibilidad real…",
-        Screen::Results => "↑↓ mover · Enter ver o modificar · Esc volver · Q salir",
+        Screen::Results => "Escribe para filtrar · ↑↓ mover · Enter ver o modificar · Esc volver",
         Screen::SeatMap => "Esc volver · Q salir",
     };
     frame.render_widget(
@@ -836,19 +843,36 @@ mod tests {
         let lines = rendered_lines(&app);
         let first = &app.result_showtimes()[0];
         let second = &app.result_showtimes()[1];
+        let first_line = lines
+            .iter()
+            .position(|line| {
+                line.contains(&first.starts_at.format("%H:%M").to_string())
+                    && line.contains(&first.venue_name)
+            })
+            .unwrap();
+        let second_line = lines
+            .iter()
+            .position(|line| {
+                line.contains(&second.starts_at.format("%H:%M").to_string())
+                    && line.contains(&second.venue_name)
+            })
+            .unwrap();
 
-        assert!(lines[6].contains(&first.starts_at.format("%H:%M").to_string()));
-        assert!(lines[6].contains("asientos"));
-        assert!(lines[6].contains(&first.venue_name));
-        assert!(lines[7].contains("REGULAR") || lines[7].contains("PRIME"));
-        assert!(lines[7].contains("DOBLADA") || lines[7].contains("SUBTITULADA"));
-        assert!(lines[7].contains("2D") || lines[7].contains("3D"));
+        assert!(lines[first_line].contains("asientos"));
         assert!(
-            lines[7].contains("JUNTOS")
-                || lines[7].contains("ASIENTO")
-                || lines[7].contains("MAPA")
+            lines[first_line + 1].contains("REGULAR") || lines[first_line + 1].contains("PRIME")
         );
-        assert!(lines[8].contains(&second.starts_at.format("%H:%M").to_string()));
+        assert!(
+            lines[first_line + 1].contains("DOBLADA")
+                || lines[first_line + 1].contains("SUBTITULADA")
+        );
+        assert!(lines[first_line + 1].contains("2D") || lines[first_line + 1].contains("3D"));
+        assert!(
+            lines[first_line + 1].contains("JUNTOS")
+                || lines[first_line + 1].contains("ASIENTO")
+                || lines[first_line + 1].contains("MAPA")
+        );
+        assert!(second_line > first_line);
         assert!(
             !lines
                 .iter()
