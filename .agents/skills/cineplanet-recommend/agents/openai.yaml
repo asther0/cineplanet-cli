@@ -1,0 +1,4 @@
+interface:
+  display_name: "Cineplanet Recommendations"
+  short_description: "Find Cineplanet showtimes and best seats"
+  default_prompt: "Use $cineplanet-recommend to find the best Cineplanet showing and seats."
