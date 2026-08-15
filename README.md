@@ -49,6 +49,21 @@ valen la pena, no solo cuántos quedan.
 - Devuelve mapas completos y legibles, con cada asiento recomendado identificado.
 - Puede revalidar una opción, seleccionar las butacas en Chrome y dejarte en `/entradas` como invitado; tú eliges tarifa, promociones y pago.
 
+## Proyecto derivado
+
+Este proyecto también dio lugar a una interfaz web y una API reutilizable para
+consultar Cineplanet sin instalar el CLI:
+
+| Proyecto | Qué aporta |
+| --- | --- |
+| [cineplanet-api](https://github.com/gersonsebastianx/cineplanet-api) | Documentación verificada por ingeniería inversa de los endpoints públicos de Cineplanet y un cliente Node.js sin dependencias para cartelera, funciones y mapas de butacas. |
+| [cineplanet-api.vercel.app](https://cineplanet-api.vercel.app) | Interfaz web conversacional para escribir una búsqueda, ver la función con su mapa y continuar hacia el enlace oficial de compra. |
+
+El CLI prioriza la comparación, el ranking de visión y el uso desde agentes;
+el proyecto derivado expone la misma fuente de datos como API y experiencia
+web compartible. Ninguno es una API oficial de Cineplanet: sus endpoints
+públicos pueden cambiar o quedar temporalmente fuera de servicio.
+
 ## Flujo
 
 ```text
