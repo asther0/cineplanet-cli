@@ -7,7 +7,7 @@ pub fn catalog() -> Catalog {
         Movie {
             id: "spider-man".into(),
             title: "Spider-Man: Un nuevo día".into(),
-            movie_details_url: None,
+            movie_details_url: Some("spider-man-un-nuevo-dia".into()),
             duration_minutes: Some(145),
             genre: Some("Acción".into()),
             rating: Some("APT".into()),
@@ -15,7 +15,7 @@ pub fn catalog() -> Catalog {
         Movie {
             id: "odyssey".into(),
             title: "La Odisea".into(),
-            movie_details_url: None,
+            movie_details_url: Some("la-odisea".into()),
             duration_minutes: Some(132),
             genre: Some("Aventura".into()),
             rating: Some("+14".into()),
@@ -23,7 +23,7 @@ pub fn catalog() -> Catalog {
         Movie {
             id: "toy-story".into(),
             title: "Toy Story 5".into(),
-            movie_details_url: None,
+            movie_details_url: Some("toy-story-5".into()),
             duration_minutes: Some(104),
             genre: Some("Animación".into()),
             rating: Some("APT".into()),

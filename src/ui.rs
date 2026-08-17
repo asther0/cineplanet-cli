@@ -862,6 +862,28 @@ fn render_seat_map(frame: &mut Frame<'_>, area: Rect, app: &App) {
         Span::raw("accesibilidad"),
     ]));
 
+    // La compra sigue ocurriendo en Cineplanet; este enlace ahorra rehacer allá
+    // la elección de ciudad, película, fecha, sede y hora.
+    if let Some(slug) = app
+        .catalog()
+        .movies
+        .iter()
+        .find(|movie| movie.id == showtime.movie_id)
+        .and_then(|movie| movie.movie_details_url.as_deref())
+        .filter(|slug| !slug.is_empty())
+    {
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec![
+            Span::styled("Comprar en Cineplanet: ", Style::default().fg(MUTED)),
+            Span::styled(
+                showtime.purchase_url(slug),
+                Style::default()
+                    .fg(PLANET_BLUE)
+                    .add_modifier(Modifier::UNDERLINED),
+            ),
+        ]));
+    }
+
     frame.render_widget(
         Paragraph::new(lines)
             .alignment(Alignment::Center)
@@ -1369,6 +1391,30 @@ mod tests {
         assert_eq!(analysis.quality, crate::domain::Quality::Unfavorable);
         assert_eq!(analysis.block.len(), 2);
         assert_eq!(analysis.showtime.id, "unfavorable");
+    }
+
+    #[test]
+    fn seat_map_offers_the_purchase_link_for_the_chosen_showtime() {
+        let mut app = app_with_results();
+        app.apply(Action::Down).unwrap();
+        app.apply(Action::Confirm).unwrap();
+        assert_eq!(app.screen(), Screen::SeatMap);
+
+        let showtime = app.current_result_showtime().unwrap().clone();
+        let slug = app
+            .catalog()
+            .movies
+            .iter()
+            .find(|movie| movie.id == showtime.movie_id)
+            .and_then(|movie| movie.movie_details_url.clone())
+            .unwrap();
+        let url = showtime.purchase_url(&slug);
+        let screen = rendered_lines(&app).join("");
+
+        assert!(
+            screen.contains(&url),
+            "expected the seat map to show {url}, got: {screen}"
+        );
     }
 
     #[test]

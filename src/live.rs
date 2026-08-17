@@ -816,6 +816,12 @@ mod tests {
         assert!(!catalog.movies.is_empty());
         assert!(!catalog.venues.is_empty());
         assert!(!catalog.showtimes.is_empty());
+        // El slug alimenta el enlace de compra: si Cineplanet dejara de
+        // mandarlo, el enlace quedaría roto en silencio.
+        assert!(catalog
+            .movies
+            .iter()
+            .any(|movie| movie.movie_details_url.as_deref().is_some_and(|s| !s.is_empty())));
     }
 
     #[tokio::test]
