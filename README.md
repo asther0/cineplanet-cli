@@ -109,7 +109,7 @@ entre la consulta y la compra.
 
 ## Proyecto derivado
 
-[cineplanet-api](https://github.com/gersonsebastianx/cineplanet-api), de
-[gersonsebastianx](https://github.com/gersonsebastianx), lleva esta integración
-a una experiencia web conversacional con IA.
+[cineplanet-api](https://github.com/gersonsebastianx/cineplanet-api), desarrollado
+por [gersonsebastianx](https://github.com/gersonsebastianx) a partir de CineplanetCLI,
+ofrece una interfaz web conversacional con IA.
 [Prueba el demo web](https://cineplanet-api.vercel.app).
